@@ -1,0 +1,59 @@
+maintenance-settings:
+  radius: 5 # 덫상자 중심 감지 범위 (반지름)
+  plank-ratio: 10 # 나무판자 10개당 재료 1개 소모
+  iron-ratio: 10 # 철 블록 10개당 철괴 1개 소모
+settings:
+  piston-enabled: false # 피스톤 on/off
+temperature-settings:
+  default-temp: 37.5
+  max-temp: 40.0
+  min-temp: 30.0
+  damage-amount: 1.0 # 틱당 데미지 (0.5 하트 = 1.0)
+  update-interval: 20 # 체온 업데이트 주기 (20틱 = 1초)
+  water-bottle-recovery: 2.0  # 물병 마실 때 회복될 체온 수치
+  # 바이옴 설정 (정확한 바이옴 이름을 입력해야 합니다)
+  insulation:
+    # 추위를 막기 위해 필요한 최소 보온 레벨
+    cold-protection-threshold: 5
+    # 더위를 느끼기 시작하는 보온 레벨 (이 수치 이상이면 더운 바이옴에서 온도 상승)
+    heat-trigger-threshold: 3
+    # 갑옷 이름별 보온 점수 (이름에 아래 문구가 포함되면 점수 부여)
+  hot-biomes:
+    - DESERT
+  cold-biomes:
+    - SNOWY_PLAINS
+    - FROZEN_OCEAN
+    - ICE_SPIKES
+    - DEEP_FROZEN_OCEAN
+  change-amount: 0.1 # 바이옴에 있을 때 변하는 온도 수치
+radiation-settings:
+  max-value: 100.0 # 방사능 최대치
+  damage-threshold: 70.0 # 데미지를 입기 시작하는 수치
+  damage-amount: 2.0 # 데미지 양
+  update-interval: 20 # 업데이트 주기 (틱)
+  water-bottle-reduction: 10.0 # 물병 마실 때 제거될 방사능 수치
+  # 방사능 강도 설정 (초당 상승 수치)
+  intensity:
+    level-1: 0.5 # 약함
+    level-2: 1.5 # 보통
+    level-3: 3.0 # 강함
+
+  # 바이옴별 강도 지정
+  biomes:
+    level-1:
+      - NETHER_WASTES
+    level-2:
+      - CRIMSON_FOREST
+      - SOUL_SAND_VALLEY
+      - WARPED FOREST
+    level-3:
+      - BASALT_DELTAS
+
+  # 안전지대(방사능이 서서히 빠지는 곳)
+  recovery-amount: 0.2
+mobs:
+  1: # 모델 데이터 번호
+    hp: 20.0
+    respawn-second: 30  # 리스폰 시간 설정
+    drops:
+      - "JEG:SCRAP:1:50" # 아이템코드:개수:확률(%)
