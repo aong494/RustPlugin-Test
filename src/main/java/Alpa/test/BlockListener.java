@@ -9,9 +9,15 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.player.PlayerBucketEmptyEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.block.Biome;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -70,12 +76,35 @@ public class BlockListener implements Listener {
             Material.CLAY
     );
 
+    // --- [새로 추가된 바이옴 체크 유틸리티] ---
+    private boolean isOceanBiome(Location loc) {
+        // 해당 위치의 바이옴 이름을 가져와 "OCEAN"이 포함되어 있는지 확인
+        String biomeName = loc.getBlock().getBiome().name();
+        return biomeName.contains("OCEAN");
+    }
+
     // 블록 파괴 처리
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
         Block block = event.getBlock();
+
+        // [추가] 바다 바이옴 체크 (OP가 아니면 파괴 불가)
+        if (!player.isOp() && isOceanBiome(block.getLocation())) {
+            event.setCancelled(true);
+            player.sendActionBar("§c바다에서는 블록을 파괴할 수 없습니다.");
+            return;
+        }
+
         Material type = block.getType();
+
+        String plankKey = "planks." + plugin.blockToKey(block);
+        String doorKey = "doors." + plugin.blockToKey(plugin.getBottom(block));
+
+        if (plugin.dataStorage.getConfig().contains(plankKey) ||
+                plugin.dataStorage.getConfig().contains(doorKey)) {
+            return; // main 클래스에서 처리하도록 양보
+        }
 
         // 보호 블록 체크 (파괴 방지)
         if (!player.isOp() && protectedBlocks.contains(type)) {
@@ -97,7 +126,8 @@ public class BlockListener implements Listener {
     }
 
     private boolean isInsideProtectorZone(Location loc) {
-        ConfigurationSection protectors = plugin.getConfig().getConfigurationSection("protectors");
+        // plugin.getConfig() 대신 dataStorage.getConfig() 사용
+        ConfigurationSection protectors = plugin.dataStorage.getConfig().getConfigurationSection("protectors");
         if (protectors == null) return false;
 
         for (String key : protectors.getKeys(false)) {
@@ -109,8 +139,6 @@ public class BlockListener implements Listener {
             int z = protectors.getInt(key + ".z");
 
             Location protectorLoc = new Location(loc.getWorld(), x, y, z);
-
-            // 덫상자와의 거리가 15블록 이하이면 리젠 금지 구역
             if (protectorLoc.distance(loc) <= 15) {
                 return true;
             }
@@ -118,31 +146,81 @@ public class BlockListener implements Listener {
         return false;
     }
 
-    // 블록 설치 처리
+    // 1. 설치 로직 (중복 제거 및 거리 제한 유지)
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockPlace(BlockPlaceEvent event) {
         Player player = event.getPlayer();
-        if (player.isOp()) return; // OP는 통과
-
         Block block = event.getBlockPlaced();
+
+        if (!player.isOp() && isOceanBiome(block.getLocation())) {
+            event.setCancelled(true);
+            player.sendActionBar("§c바다에서는 블록을 설치할 수 없습니다.");
+            return;
+        }
+
         Material placedType = block.getType();
-        String typeName = placedType.name(); // 블록의 이름을 문자열로 가져옴
 
-        // 1. 보호 블록 설치 방지
-        if (!player.isOp() && protectedBlocks.contains(placedType)) {
-            event.setCancelled(true);
+        // 덫상자(보호 구역 도구)인 경우 전용 메서드로 처리
+        if (placedType == Material.TRAPPED_CHEST) {
+            handleProtectorPlace(event); // 이 안에서 거리 체크와 데이터 저장을 모두 수행합니다.
             return;
         }
 
-        // 2. 설치 제한 블록 방지 (새로 추가된 기능)
-        if (!player.isOp() && placeRestrictedBlocks.contains(placedType)) {
+        // 일반 블록: 보호 구역 체크
+        if (isProtectedLocation(player, block.getLocation())) {
             event.setCancelled(true);
+            player.sendActionBar("§c이 지역은 건설차단 구역입니다.");
             return;
         }
-        // 3. 모드 블록 체크 (문자열 비교)
-        if (typeName.equalsIgnoreCase("JEG_BRIMSTONE_ORE") || typeName.contains("BRIMSTONE_ORE")) {
+
+        // ... (이후 기존의 OP 체크 및 설치 제한 로직)
+        if (player.isOp()) return;
+        if (protectedBlocks.contains(placedType) || placeRestrictedBlocks.contains(placedType)) {
             event.setCancelled(true);
         }
+    }
+
+    // 2. 덫상자 전용 처리 메서드 (수정됨)
+    private void handleProtectorPlace(BlockPlaceEvent e) {
+        Player p = e.getPlayer();
+        Location newLoc = e.getBlock().getLocation();
+
+        ConfigurationSection protectors = plugin.getConfig().getConfigurationSection("protectors");
+        if (protectors != null) {
+            for (String key : protectors.getKeys(false)) {
+                // 설치 중인 바로 그 좌표는 제외하고 거리 체크 (버그 방지)
+                if (key.equals(plugin.blockToKey(e.getBlock()))) continue;
+
+                String worldName = protectors.getString(key + ".world");
+                if (worldName == null || !worldName.equals(newLoc.getWorld().getName())) continue;
+
+                int x = protectors.getInt(key + ".x");
+                int y = protectors.getInt(key + ".y");
+                int z = protectors.getInt(key + ".z");
+                Location existingLoc = new Location(newLoc.getWorld(), x, y, z);
+
+                if (existingLoc.distance(newLoc) < 30) {
+                    e.setCancelled(true);
+                    p.sendActionBar("§c주변 도구함과 너무 가깝습니다! (최소 30블록 거리 필요)");
+                    return;
+                }
+            }
+        }
+
+        // 데이터 저장
+        String key = "protectors." + plugin.blockToKey(e.getBlock());
+        plugin.dataStorage.getConfig().set(key + ".world", newLoc.getWorld().getName());
+        plugin.dataStorage.getConfig().set(key + ".x", newLoc.getBlockX());
+        plugin.dataStorage.getConfig().set(key + ".y", newLoc.getBlockY());
+        plugin.dataStorage.getConfig().set(key + ".z", newLoc.getBlockZ());
+        plugin.dataStorage.getConfig().set(key + ".owner", p.getUniqueId().toString()); // 주인 저장
+
+        List<String> authUsers = new ArrayList<>();
+        authUsers.add(p.getUniqueId().toString());
+        plugin.dataStorage.getConfig().set(key + ".authorized_users", authUsers);
+
+        plugin.dataStorage.saveConfig();
+        p.sendActionBar("§a건설차단 구역이 설정되었습니다. (반경 15블록)");
     }
 
     // scheduleRegen 메서드만 이 내용으로 교체하세요
@@ -179,6 +257,99 @@ public class BlockListener implements Listener {
         if (itemType.name().contains("SAPLING")) {
             // 주변에 나뭇잎이 있는지 확인하거나, 그냥 모든 묘목 드랍을 막음
             event.setCancelled(true);
+        }
+    }
+    // --- [보호 구역 확인 유틸리티] ---
+    private boolean isProtectedLocation(Player player, Location loc) {
+        if (player.isOp()) return false;
+
+        ConfigurationSection protectors = plugin.dataStorage.getConfig().getConfigurationSection("protectors");
+        if (protectors == null) return false;
+
+        for (String key : protectors.getKeys(false)) {
+            String worldName = protectors.getString(key + ".world");
+            if (worldName == null || !worldName.equals(loc.getWorld().getName())) continue;
+
+            int x = protectors.getInt(key + ".x");
+            int y = protectors.getInt(key + ".y");
+            int z = protectors.getInt(key + ".z");
+            Location protectorLoc = new Location(loc.getWorld(), x, y, z);
+
+            if (protectorLoc.distance(loc) <= 15) {
+                // [중요] dataStorage에서 권한 리스트 읽기
+                List<String> authUsers = plugin.dataStorage.getConfig().getStringList("protectors." + key + ".authorized_users");
+                if (authUsers.contains(player.getUniqueId().toString())) {
+                    return false; // 권한 있음
+                }
+                return true; // 권한 없음 (보호됨)
+            }
+        }
+        return false;
+    }
+
+    @EventHandler
+    public void onProtectorInteract(PlayerInteractEvent e) {
+        if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        Block b = e.getClickedBlock();
+        if (b == null || b.getType() != Material.TRAPPED_CHEST) return;
+
+        String key = "protectors." + plugin.blockToKey(b);
+        // dataStorage 확인
+        if (!plugin.dataStorage.getConfig().contains(key)) return;
+
+        Player p = e.getPlayer();
+        List<String> authUsers = plugin.dataStorage.getConfig().getStringList(key + ".authorized_users");
+        String pUUID = p.getUniqueId().toString();
+
+        if (!authUsers.contains(pUUID)) {
+            authUsers.add(pUUID);
+            plugin.dataStorage.getConfig().set(key + ".authorized_users", authUsers);
+            plugin.dataStorage.saveConfig();
+            p.sendActionBar("§a이 도구함의 권한을 획득했습니다!");
+        }
+    }
+
+    // 3. 덫상자 파괴 시 아이템 쏟아지기 (추가됨)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onProtectorBreak(BlockBreakEvent e) {
+        Block b = e.getBlock();
+        if (b.getType() != Material.TRAPPED_CHEST) return;
+
+        String key = "protectors." + plugin.blockToKey(b);
+        // dataStorage 확인
+        if (plugin.dataStorage.getConfig().contains(key)) {
+            Player p = e.getPlayer();
+            List<String> authUsers = plugin.dataStorage.getConfig().getStringList(key + ".authorized_users");
+
+            if (p.isOp() || authUsers.contains(p.getUniqueId().toString())) {
+                // 아이템 드랍 로직
+                if (b.getState() instanceof org.bukkit.block.Chest chest) {
+                    for (ItemStack item : chest.getInventory().getContents()) {
+                        if (item != null && item.getType() != Material.AIR) {
+                            b.getWorld().dropItemNaturally(b.getLocation(), item);
+                        }
+                    }
+                    chest.getInventory().clear();
+                }
+
+                // [메시지 출력 후 삭제]
+                p.sendActionBar("§e도구함 데이터와 보관된 재료가 정리되었습니다.");
+                plugin.dataStorage.getConfig().set(key, null);
+                plugin.dataStorage.saveConfig();
+            } else {
+                e.setCancelled(true);
+                p.sendActionBar("§c이 도구함을 해제할 권한이 없습니다!");
+            }
+        }
+    }
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onBucketEmpty(PlayerBucketEmptyEvent e) {
+        Player p = e.getPlayer();
+        Location loc = e.getBlockClicked().getRelative(e.getBlockFace()).getLocation();
+
+        if (isProtectedLocation(p, loc)) {
+            e.setCancelled(true);
+            p.sendActionBar("§c자신의 건설차단 구역에서만 가능합니다.");
         }
     }
 }

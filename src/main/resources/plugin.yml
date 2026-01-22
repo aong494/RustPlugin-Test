@@ -14,8 +14,6 @@ commands:
   방호설정:
     description: 아이템에 방호 태그를 부여합니다.
     permission: op
-  커스텀몹:
-    description: 커스텀 몹 관리 명령어
   침대:
     description: 부활 지점 GUI를 엽니다.
     usage: /침대
@@ -25,4 +23,7 @@ commands:
     description: 현재 위치를 랜덤 리스폰 좌표 리스트에 추가합니다.
   레이드박스:
     description: 레이드 박스를 관리합니다.
+    permission: op
+  스포너설정:
+    description: "새로운 필드 몹 스포너를 설정합니다."
     permission: op

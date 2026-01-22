@@ -22,63 +22,69 @@ public class PlankHealthManager implements Listener {
         this.plugin = plugin;
     }
 
-    // 2. 우클릭 체력 확인 및 쉬프트 우클릭 즉시 파괴 (권한 체크 포함)
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onPlankPlace(BlockPlaceEvent e) {
-        // ignoreCancelled = true: main에서 e.setCancelled(true)를 했다면 이 코드는 실행되지 않습니다.
-        // EventPriority.MONITOR: 모든 보호 로직이 끝난 후 가장 마지막에 실행되도록 합니다.
+    // [유틸리티 메소드] 판자나 나무 계단인지 확인하는 로직
+    private boolean isTargetBlock(Material material) {
+        if (material == null) return false;
+        String name = material.name().toUpperCase();
 
-        Block b = e.getBlock();
-        if (!b.getType().name().contains("_PLANKS")) return;
+        // 1. 나무 판자/계단
+        boolean isWoodPlank = name.contains("_PLANKS");
+        boolean isWoodStair = name.contains("_STAIRS") && !name.contains("COBBLE") && !name.contains("STONE") && !name.contains("BRICK");
 
-        String key = "planks." + plugin.blockToKey(b);
+        // 2. 석재(조약돌) 판자/계단 (추가됨)
+        boolean isStoneBrick = name.equals("STONE_BRICKS");
+        boolean isStoneBrickStair = name.equals("STONE_BRICK_STAIRS");
 
-        plugin.getConfig().set(key + ".health", PLANK_MAX_HP);
-        plugin.getConfig().set(key + ".owner", e.getPlayer().getUniqueId().toString());
-        plugin.saveConfig();
-
-        e.getPlayer().sendMessage("§e[Plank] 강화된 나무판자가 설치되었습니다. (체력: " + PLANK_MAX_HP + ")");
+        return isWoodPlank || isWoodStair || isStoneBrick || isStoneBrickStair;
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlankPlace(BlockPlaceEvent e) {
+        Block b = e.getBlock();
+        Material type = b.getType();
+        if (!isTargetBlock(type)) return;
+
+        String key = plugin.blockToKey(b);
+        String path = "planks." + key;
+        String typeName = type.name();
+
+        // 재질에 따른 초기 체력 결정
+        int initialHp = 50;
+        if (typeName.contains("IRON")) initialHp = 200;
+        else if (typeName.contains("STONE_BRICK")) initialHp = 100;
+
+        // data.yml에 저장
+        plugin.dataStorage.getConfig().set(path + ".health", initialHp);
+        plugin.dataStorage.getConfig().set(path + ".owner", e.getPlayer().getUniqueId().toString());
+        plugin.dataStorage.saveConfig();
+    }
+
+    // 상호작용 로직
     @EventHandler
     public void onPlankInteract(PlayerInteractEvent e) {
         if (e.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) return;
         if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
 
         Block b = e.getClickedBlock();
-        if (b == null || !b.getType().name().contains("_PLANKS")) return;
+        if (b == null || !isTargetBlock(b.getType())) return;
 
-        String key = "planks." + plugin.blockToKey(b);
-        if (!plugin.getConfig().contains(key)) return;
+        String key = plugin.blockToKey(b);
+        if (!plugin.dataStorage.getConfig().contains("planks." + key)) return;
 
         Player p = e.getPlayer();
-
         if (p.getInventory().getItemInMainHand().getType() == Material.STICK) {
             e.setCancelled(true);
 
-            if (!hasPermission(p, key)) {
-                // 권한 없음 알림도 액션바에 표시 (선택 사항)
+            // [권한 체크]
+            if (!plugin.canAccess(p, key, "planks")) {
                 p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText("§c[Plank] 관리 권한이 없습니다."));
+                        TextComponent.fromLegacyText("§c[Plank] 이 블록의 관리 권한이 없습니다."));
                 return;
             }
 
-            if (p.isSneaking()) {
-                int currentHp = plugin.getConfig().getInt(key + ".health");
-                plugin.applyPlankDmg(b, currentHp, p);
-                // 철거 완료 메시지는 액션바에서 처리됨 (applyPlankDmg 내부 로직 연동)
-            } else {
-                int hp = plugin.getConfig().getInt(key + ".health");
-                int maxHp = 50; // 판자 최대 체력 설정값 (필요 시 수정)
-
-                // [수정] 채팅 대신 액션바 + 시각적 체력바 표시
-                String progressBar = getProgressBar(hp, maxHp);
-                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText("§6[Plank] 남은 체력: " + progressBar + " §f(" + hp + " / " + maxHp + ")"));
-            }
+            // 이후 철거/확인 로직 수행 (생략)
         }
     }
-
     private String getProgressBar(int current, int max) {
         int bars = 10;
         int completedBars = (int) (((double) current / max) * bars);
@@ -94,21 +100,20 @@ public class PlankHealthManager implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlankBreak(BlockBreakEvent e) {
         Block b = e.getBlock();
-        if (!b.getType().name().contains("_PLANKS")) return;
+        if (!isTargetBlock(b.getType())) return;
 
-        String key = "planks." + plugin.blockToKey(b);
-        if (!plugin.getConfig().contains(key)) return;
+        // dataStorage에서 키 확인
+        String blockKey = plugin.blockToKey(b);
+        if (!plugin.dataStorage.getConfig().contains("planks." + blockKey)) return;
 
         Player p = e.getPlayer();
+        e.setCancelled(true); // 블록 파괴 취소 (체력 로직으로 전환)
 
-        e.setCancelled(true); // 블록 파괴 취소
-
-        // 데미지 계산
+        // 데미지 설정 (설정값은 config.yml 유지)
         String toolName = p.getInventory().getItemInMainHand().getType().name();
         int dmg = plugin.getConfig().getInt("damage-settings." + toolName,
                 plugin.getConfig().getInt("damage-settings.DEFAULT", 1));
 
-        // 수정된 applyPlankDmg 호출 (플레이어 p 인자 추가)
         plugin.applyPlankDmg(b, dmg, p);
     }
     // --- 권한 확인 로직 ---

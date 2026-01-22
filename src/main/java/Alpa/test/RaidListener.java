@@ -1,12 +1,12 @@
 package Alpa.test;
 
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.inventory.InventoryCloseEvent;
@@ -14,8 +14,6 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
-import java.util.Map;
-import java.util.Random;
 
 public class RaidListener implements Listener {
     private final main plugin;
@@ -76,6 +74,8 @@ public class RaidListener implements Listener {
     public void onRaidMobDeath(org.bukkit.event.entity.EntityDeathEvent event) {
         LivingEntity victim = event.getEntity();
         String templateName = null;
+
+        // 1. 레이드 몹인지 확인
         for (String tag : victim.getScoreboardTags()) {
             if (tag.startsWith("raid_mob_")) {
                 templateName = tag.replace("raid_mob_", "");
@@ -84,20 +84,24 @@ public class RaidListener implements Listener {
         }
         if (templateName == null) return;
 
+        // 기존 드랍 아이템 제거
         event.getDrops().clear();
-        Random random = new Random();
+        java.util.Random random = new java.util.Random();
 
-        // ⭐ 커스텀 드랍(ItemStack 방식) 처리
+        // 2. RaidManager에서 직접 설정된 커스텀 드랍템 로드
         ConfigurationSection config = plugin.getRaidManager().getConfig();
         String path = "raidboxes." + templateName + ".mob.custom-drops";
 
         if (config.contains(path)) {
+            // 저장된 리스트(ItemStack 포함)를 불러옴
             List<?> customDrops = config.getList(path);
             for (Object obj : customDrops) {
-                if (obj instanceof Map<?, ?> map) {
+                if (obj instanceof java.util.Map) {
+                    java.util.Map<?, ?> map = (java.util.Map<?, ?>) obj;
                     ItemStack item = (ItemStack) map.get("item");
                     int chance = (int) map.get("chance");
 
+                    // 확률 계산 후 드랍
                     if (random.nextInt(100) < chance) {
                         event.getDrops().add(item.clone());
                     }

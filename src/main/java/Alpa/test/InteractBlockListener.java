@@ -51,21 +51,16 @@ public class InteractBlockListener implements Listener {
 
         String blockType = block.getType().name();
         if (plugin.interactBlockManager.getConfig().contains("blocks." + blockType)) {
-            event.setCancelled(true); // 블록 기본 상호작용 막기
+            event.setCancelled(true);
 
-            // 1. 아이템 드랍
+            // 이미 Manager에서 랜덤 개수가 결정된 아이템 리스트를 가져옴
             for (ItemStack item : plugin.interactBlockManager.getRandomDrops(blockType)) {
-                block.getWorld().dropItemNaturally(block.getLocation(), item);
+                block.getWorld().dropItemNaturally(block.getLocation().add(0.5, 0.5, 0.5), item);
             }
 
-            // 2. 블록 타입 및 리젠 시간 가져오기
             Material originalType = block.getType();
             int delay = plugin.interactBlockManager.getConfig().getInt("blocks." + blockType + ".regen_seconds");
-
-            // 3. 블록 일시 제거
             block.setType(Material.AIR);
-
-            // 4. ⭐ 중요: 직접 스케줄러를 돌리지 말고, 아래 정의한 scheduleRegen을 호출해야 파일에 저장됩니다!
             scheduleRegen(block, originalType, delay);
         }
     }

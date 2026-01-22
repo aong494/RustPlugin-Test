@@ -51,9 +51,3 @@ radiation-settings:
 
   # 안전지대(방사능이 서서히 빠지는 곳)
   recovery-amount: 0.2
-mobs:
-  1: # 모델 데이터 번호
-    hp: 20.0
-    respawn-second: 30  # 리스폰 시간 설정
-    drops:
-      - "JEG:SCRAP:1:50" # 아이템코드:개수:확률(%)

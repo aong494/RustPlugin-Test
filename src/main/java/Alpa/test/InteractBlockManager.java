@@ -79,7 +79,25 @@ public class InteractBlockManager {
             if (mat == null) continue;
 
             if (random.nextInt(100) < Integer.parseInt(split[2])) {
-                ItemStack item = new ItemStack(mat, Integer.parseInt(split[1]));
+                // --- [개수 범위 처리 로직 추가] ---
+                int amount = 1;
+                String amountStr = split[1]; // 두 번째 값 (개수)
+
+                if (amountStr.contains("-")) {
+                    // "1-3" 같은 형식인 경우
+                    String[] range = amountStr.split("-");
+                    int min = Integer.parseInt(range[0]);
+                    int max = Integer.parseInt(range[1]);
+                    if (max > min) {
+                        amount = min + random.nextInt(max - min + 1);
+                    } else {
+                        amount = min;
+                    }
+                } else {
+                    // 단일 숫자인 경우
+                    amount = Integer.parseInt(amountStr);
+                }
+                ItemStack item = new ItemStack(mat, amount);
                 ItemMeta meta = item.getItemMeta();
 
                 if (meta != null) {
@@ -151,6 +169,11 @@ public class InteractBlockManager {
                                 }
                             }
                         }
+                    }
+
+                    if (split.length >= 9 && !split[8].equalsIgnoreCase("none") && !split[8].isEmpty()) {
+                        String customName = split[8].replace("&", "§").replace("_", " ");
+                        meta.setDisplayName(customName);
                     }
 
                     // ⭐ 7. 모든 내용이 추가된 lore 리스트를 최종적으로 적용

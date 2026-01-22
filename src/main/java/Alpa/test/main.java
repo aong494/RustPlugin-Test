@@ -1,11 +1,11 @@
 package Alpa.test;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.*;
 import org.bukkit.block.Block;
-import org.bukkit.block.data.Bisected;
-import org.bukkit.block.data.type.Door;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -17,11 +17,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
-import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.BlockSpreadEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
-import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.inventory.ItemStack;
@@ -34,10 +31,11 @@ import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.ScoreboardManager;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
-
+import java.io.*;
+import java.lang.reflect.Type;
+import java.util.*;
+import com.google.gson.*;
+import com.google.gson.reflect.TypeToken;
 
 
 public final class main extends JavaPlugin implements Listener, CommandExecutor {
@@ -48,13 +46,19 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     private final int MAX_HP = 100;
     private TemperatureManager tempManager;
     private RadiationManager radManager;
-    public SpawnManager spawnManager;
     public RespawnManager respawnManager;
     public BlockRegenManager blockRegenManager;
     public InteractBlockManager interactBlockManager;
     public BlockListener blockListener;
     private final java.util.Set<String> processingLocations = new java.util.HashSet<>();
     public RaidManager raidManager;
+    public RouletteManager rouletteManager;
+    public RouletteListener rouletteListener;
+    public DataManager dataStorage;
+    private final java.util.Map<java.util.UUID, Long> breakCooldown = new java.util.HashMap<>();
+    public File spawnerFile;
+    public org.bukkit.configuration.file.FileConfiguration spawnerConfig;
+    public ElectricManager electricManager;
 
     @Override
     public void onEnable() {
@@ -63,28 +67,60 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         this.craftManager = new CraftManager(this);
         this.tempManager = new TemperatureManager(this);
         this.radManager = new RadiationManager(this);
-        this.spawnManager = new SpawnManager(this);
-        this.spawnManager.loadAllSpawns();
         this.respawnManager = new RespawnManager(this);
         this.blockRegenManager = new BlockRegenManager(this);
         this.interactBlockManager = new InteractBlockManager(this);
         this.blockListener = new BlockListener(this);
         this.raidManager = new RaidManager(this);
+        this.rouletteManager = new RouletteManager(this);
+        this.rouletteListener = new RouletteListener(this, this.rouletteManager);
+        this.dataStorage = new DataManager(this);
+        this.electricManager = new ElectricManager(this);
+        this.spawnerFile = new File(getDataFolder(), "custom_spawners.yml");
+        this.spawnerConfig = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(spawnerFile);
 
         addDefaultSettings();
         getServer().getPluginManager().registerEvents(this.bedManager, this);
         getServer().getPluginManager().registerEvents(new PlankHealthManager(this), this);
         getServer().getPluginManager().registerEvents(new PlankToIronManager(this), this);
-        getServer().getPluginManager().registerEvents(new IronBlockManager(this), this);
         getServer().getPluginManager().registerEvents(new JoinManager(this), this);
         getServer().getPluginManager().registerEvents(new EnvironmentManager(this), this);
         getServer().getPluginManager().registerEvents(this.craftManager, this);
         getServer().getPluginManager().registerEvents(new ReinforcedManager(this), this);
-        getServer().getPluginManager().registerEvents(new MobListener(this), this);
         getServer().getPluginManager().registerEvents(new RespawnListener(this), this);
         getServer().getPluginManager().registerEvents(new InteractBlockListener(this), this);
-        getServer().getPluginManager().registerEvents(this.blockListener, this);
+        getServer().getPluginManager().registerEvents(new BlockListener(this), this);
         getServer().getPluginManager().registerEvents(new RaidListener(this), this);
+        getServer().getPluginManager().registerEvents(new BlockDrops(this), this);
+        getServer().getPluginManager().registerEvents(new MobListener(), this);
+        getServer().getPluginManager().registerEvents(new RouletteListener(this, this.rouletteManager), this);
+        getServer().getPluginManager().registerEvents(new PlankRepairManager(this), this);
+        getServer().getPluginManager().registerEvents(new DoorManager(this), this);
+        getServer().getPluginManager().registerEvents(this, this);
+        getServer().getPluginManager().registerEvents(this.electricManager, this);
+
+        if (!getConfig().contains("stone-settings")) {
+            getConfig().set("stone-settings.repair-amount", 20); // 석재 수리량
+            getConfig().set("stone-settings.repair-cost", 1);    // 수리 비용
+        }
+        // 1. 플러그인 데이터 폴더 확인 및 생성
+        if (!getDataFolder().exists()) {
+            getDataFolder().mkdirs();
+        }
+
+        // 2. custom_spawners.yml 파일 처리
+        File spawnerFile = new File(getDataFolder(), "custom_spawners.yml");
+
+        if (!spawnerFile.exists()) {
+            try {
+                // JAR 내부에서 복사하는 대신 빈 파일을 물리적으로 생성 (가장 안전함)
+                spawnerFile.createNewFile();
+                getLogger().info("custom_spawners.yml 파일이 없어서 새로 생성했습니다.");
+            } catch (IOException e) {
+                getLogger().severe("파일 생성 중 오류 발생: " + e.getMessage());
+            }
+        }
+        if (getCommand("스포너설정") != null) getCommand("스포너설정").setExecutor(this);
 
         getCommand("보온설정").setExecutor(this);
 
@@ -100,12 +136,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         new BlockDecayManager(this).runTaskTimer(this, intervalTicks, intervalTicks);
 
         Bukkit.getLogger().info("[System] 체력 감소 시스템이 " + intervalSeconds + "초 주기로 시작되었습니다.");
-
-        Bukkit.getScheduler().runTaskLater(this, () -> {
-            if (this.spawnManager != null) {
-                this.spawnManager.loadAllSpawns();
-            }
-        }, 40L);
 
         // 명령어 등록
         if (getCommand("그룹") != null) getCommand("그룹").setExecutor(this);
@@ -136,18 +166,22 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             blockRegenManager.savePending();
         }
 
-        // ⭐ RaidManager의 cleanup을 호출하여 모든 인스턴스의 홀로그램과 태스크를 정리
+        // 모든 인스턴스의 홀로그램과 태스크를 정리
         if (this.raidManager != null) {
             this.raidManager.cleanup();
-
-            // 혹시 모를 잔해들(태그된 엔티티) 최종 청소
             for (World world : Bukkit.getWorlds()) {
                 for (Entity entity : world.getEntities()) {
                     if (entity instanceof ArmorStand && entity.getScoreboardTags().contains("raid_hologram")) {
-                        entity.remove();
+                        if (!entity.getScoreboardTags().contains("kubejs_managed")) {
+                            entity.remove();
+                        }
                     }
                 }
             }
+        }
+        if (this.electricManager != null) {
+            this.electricManager.saveBlocks();
+            getLogger().info("[Electric] 전력 시스템 데이터가 저장되었습니다.");
         }
         getLogger().info("플러그인이 비활성화되었습니다.");
     }
@@ -201,110 +235,100 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     }
 
     private void addDefaultSettings() {
-        if (!getConfig().contains("damage-settings")) {
-            getConfig().set("damage-settings.NETHERITE_AXE", 15);
-            getConfig().set("damage-settings.DIAMOND_AXE", 10);
-            getConfig().set("damage-settings.DEFAULT", 1);
-        }
         // [추가] 판자 회복량 설정
         if (!getConfig().contains("plank-settings")) {
             getConfig().set("plank-settings.repair-amount", 10); // 판자 1개당 회복될 체력
             getConfig().set("plank-settings.repair-cost", 1);   // 수리 1회당 소모되는 판자 개수
         }
-        if (!getConfig().contains("tnt-settings")) {
-            getConfig().set("tnt-settings.기본", 10);
+        if (!getConfig().contains("explosion-settings")) {
+            getConfig().set("explosion-settings.rocket_launcher", 50);
+            getConfig().set("explosion-settings.explosive_charge", 100);
+            getConfig().set("explosion-settings.grenade", 30);
         }
         getConfig().addDefault("settings.piston-enabled", true);
         getConfig().options().copyDefaults(true);
         saveConfig();
     }
 
-    @EventHandler
-    public void onChunkLoad(org.bukkit.event.world.ChunkLoadEvent event) {
-        if (this.spawnManager == null || this.spawnManager.getConfig() == null) return;
-        if (!this.spawnManager.getConfig().contains("spawns")) return;
-
-        for (String key : this.spawnManager.getConfig().getConfigurationSection("spawns").getKeys(false)) {
-            String path = "spawns." + key;
-            String worldName = this.spawnManager.getConfig().getString(path + ".world");
-
-            if (!event.getWorld().getName().equals(worldName)) continue;
-
-            double x = this.spawnManager.getConfig().getDouble(path + ".x");
-            double z = this.spawnManager.getConfig().getDouble(path + ".z");
-
-            int chunkX = (int) Math.floor(x) / 16;
-            int chunkZ = (int) Math.floor(z) / 16;
-
-            if (event.getChunk().getX() == chunkX && event.getChunk().getZ() == chunkZ) {
-                // 좌표별 고유 ID 생성 (중복 실행 방지용)
-                String locId = worldName + "_" + (int)x + "_" + (int)z;
-
-                // 이미 이 좌표에 대해 소환 작업이 진행 중이라면 스킵
-                if (processingLocations.contains(locId)) continue;
-
-                Location loc = new Location(
-                        event.getWorld(), x,
-                        this.spawnManager.getConfig().getDouble(path + ".y"), z
-                );
-
-                // 1. 먼저 부활 대기 중인지 확인
-                if (this.spawnManager.isPending(loc)) continue;
-
-                // 2. 소환 로직 시작 (처리 목록에 추가)
-                processingLocations.add(locId);
-
-                // 1틱 뒤에 엔티티 존재 여부를 확인하고 소환
-                Bukkit.getScheduler().runTaskLater(this, () -> {
-                    try {
-                        // 주변 2블록 내에 이미 본체가 있는지 최종 확인
-                        boolean exists = loc.getWorld().getNearbyEntities(loc, 1.5, 3.0, 1.5).stream()
-                                .anyMatch(e -> e.getScoreboardTags().contains("custom_mob_base"));
-
-                        if (!exists) {
-                            int modelData = this.spawnManager.getConfig().getInt(path + ".modelData");
-                            CustomMobSummoner.spawnStaticMob(this, loc, modelData);
-                        }
-                    } finally {
-                        // 소환 작업이 끝나면 (성공하든 실패하든) 2초 후에 목록에서 제거하여 다음 로드에 대비
-                        Bukkit.getScheduler().runTaskLater(this, () -> processingLocations.remove(locId), 40L);
-                    }
-                }, 1L);
-            }
-        }
-    }
-
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!(sender instanceof Player player)) return false;
-
-        // 3. [추가] 커스텀 몹 생성 명령어
-        if (label.equalsIgnoreCase("커스텀몹")) {
+        if (label.equalsIgnoreCase("스포너설정")) {
             if (!player.isOp()) return true;
             if (args.length < 2) {
-                player.sendMessage("§c사용법: /커스텀몹 <생성|설치> <모델번호>");
+                player.sendMessage("§c사용법: /스포너설정 <이름> <재소환시간(초)>");
                 return true;
             }
 
-            String action = args[0];
-            int modelData;
+            String mobName = args[0];
+            int interval;
             try {
-                modelData = Integer.parseInt(args[1]);
+                interval = Integer.parseInt(args[1]);
             } catch (NumberFormatException e) {
-                player.sendMessage("§c숫자를 입력해주세요.");
+                player.sendMessage("§c[System] 시간은 숫자로 입력해주세요.");
                 return true;
             }
 
-            if (action.equalsIgnoreCase("생성")) {
-                // 1회성 소환
-                CustomMobSummoner.spawnStaticMob(this, player.getLocation(), modelData);
-                player.sendMessage("§a[System] §f" + modelData + "번 일회용 몹을 소환했습니다.");
+            Location l = player.getLocation();
+            File file = new File(getDataFolder(), "custom_spawners.json");
+            Map<String, Object> config = new HashMap<>();
+
+            // 1. 기존 데이터 읽기 (안전한 방식)
+            if (file.exists() && file.length() > 0) {
+                try (Reader reader = new FileReader(file)) {
+                    Map<String, Object> tempConfig = new Gson().fromJson(reader, new TypeToken<Map<String, Object>>(){}.getType());
+                    if (tempConfig != null) {
+                        config = tempConfig;
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
-            else if (action.equalsIgnoreCase("설치")) {
-                // 좌표 저장 및 지속 소환 등록
-                spawnManager.addSpawnLocation(player.getLocation(), modelData);
-                player.sendMessage("§b[System] §f" + modelData + "번 리스폰 몹을 설치했습니다. (좌표 저장됨)");
+
+            // 2. 해당 이름의 몹 섹션이 없으면 기본 정보 생성
+            if (!config.containsKey(mobName)) {
+                Map<String, Object> mobInfo = new HashMap<>();
+                mobInfo.put("type", "husk"); // 소문자로 변경
+                mobInfo.put("hp", 40);
+                mobInfo.put("speed", 0.1);
+                mobInfo.put("weapon", "jeg:assault_rifle".toLowerCase()); // 소문자로 저장
+
+                Map<String, String> armor = new HashMap<>();
+                armor.put("helmet", "lrarmor:defender_helmet".toLowerCase());
+                armor.put("chestplate", "lrarmor:defender_chestplate".toLowerCase());
+                armor.put("leggings", "lrarmor:defender_leggings".toLowerCase());
+                armor.put("boots", "lrarmor:defender_boots".toLowerCase());
+                mobInfo.put("armor", armor);
+
+                List<Map<String, Object>> drops = new ArrayList<>();
+                Map<String, Object> drop1 = new HashMap<>();
+                drop1.put("item", "jeg:rifle_ammo");
+                drop1.put("chance", 100);
+                drop1.put("amount", 1);
+                drops.add(drop1);
+                mobInfo.put("custom-drops", drops);
+
+                mobInfo.put("spawns", new ArrayList<Map<String, Object>>());
+                config.put(mobName, mobInfo);
             }
+
+            // 3. 데이터 캐스팅 및 좌표 추가
+            Map<String, Object> mobInfo = (Map<String, Object>) config.get(mobName);
+            List<Map<String, Object>> spawnList = (List<Map<String, Object>>) mobInfo.get("spawns");
+
+            Map<String, Object> newSpawn = new HashMap<>();
+            newSpawn.put("id", (mobName + "_" + (spawnList.size() + 1)).toLowerCase());
+            newSpawn.put("interval", interval);
+            newSpawn.put("x", Math.round(l.getX() * 100.0) / 100.0);
+            newSpawn.put("y", Math.round(l.getY() * 100.0) / 100.0);
+            newSpawn.put("z", Math.round(l.getZ() * 100.0) / 100.0);
+            spawnList.add(newSpawn);
+
+            // 4. 저장
+            try (Writer writer = new FileWriter(file)) {
+                new GsonBuilder().setPrettyPrinting().create().toJson(config, writer);
+                player.sendMessage("§a[System] §f" + mobName + " 좌표 등록 완료!");
+            } catch (IOException e) { e.printStackTrace(); }
             return true;
         }
         if (label.equalsIgnoreCase("레이드박스")) {
@@ -314,7 +338,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             }
 
             if (args.length < 2) {
-                player.sendMessage("§c사용법: /레이드박스 <설치|확인|삭제> <이름>");
+                player.sendMessage("§c사용법: /레이드박스 <설치|확인|삭제|드랍템|장비> <이름>");
                 return true;
             }
 
@@ -443,7 +467,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
                 return true;
             }
         }
-
         // 2. 도움말 출력 (인자가 부족할 때)
         if (args.length < 2) {
             String[] helpMessages = {
@@ -504,6 +527,15 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             }
         }
         return false;
+    }
+    public void saveSpawnerConfig() {
+        try {
+            if (spawnerConfig != null && spawnerFile != null) {
+                spawnerConfig.save(spawnerFile);
+            }
+        } catch (java.io.IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public void setRadiationTag(Player player, int level) {
@@ -585,18 +617,27 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         player.openInventory(gui);
     }
 
+    public Block getBottom(Block b) {
+        if (b.getType().name().contains("_DOOR")) {
+            if (b.getBlockData() instanceof org.bukkit.block.data.type.Door door) {
+                if (door.getHalf() == org.bukkit.block.data.type.Door.Half.TOP) {
+                    return b.getRelative(0, -1, 0);
+                }
+            }
+        }
+        return b;
+    }
+
     @EventHandler
     public void onDoorRedstone(org.bukkit.event.block.BlockRedstoneEvent e) {
         Block b = e.getBlock();
 
-        // 1. 신호가 들어가는 블록이 문인지 확인
         if (b.getType().name().contains("_DOOR")) {
             Block bottom = getBottom(b);
             String key = "doors." + blockToKey(bottom);
 
-            // 2. 해당 문이 잠금 데이터(데이터베이스/Config)에 존재한다면
-            if (getConfig().contains(key)) {
-                // 3. 신호의 강도를 0으로 만들어 문이 열리는 것을 방지
+            // [수정] dataStorage에 문 정보가 있는지 확인
+            if (dataStorage.getConfig().contains(key)) {
                 if (e.getNewCurrent() > 0) {
                     e.setNewCurrent(0);
                 }
@@ -616,147 +657,25 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         // main에서는 그룹 멤버 GUI 클릭 방지만 남겨두시면 됩니다.
     }
 
-    private boolean canAccess(Player p, String locKey) {
+    public boolean canAccess(Player p, String locKey, String category) {
         if (p.isOp()) return true;
 
-        String ownerUUIDStr = getConfig().getString(locKey + ".owner");
-        if (ownerUUIDStr == null) return true;
+        String path = category + "." + locKey;
+        String ownerUUID = dataStorage.getConfig().getString(path + ".owner");
 
-        UUID ownerUUID = UUID.fromString(ownerUUIDStr);
-        if (p.getUniqueId().equals(ownerUUID)) return true;
+        // 주인 정보가 없으면 공용 블록으로 간주 (또는 설치 시점부터 저장되도록 관리)
+        if (ownerUUID == null) return true;
 
-        // OfflinePlayer를 이용해 그룹 체크 (매개변수 타입 에러 해결)
-        OfflinePlayer owner = Bukkit.getOfflinePlayer(ownerUUID);
+        // 1. 본인인지 확인
+        if (p.getUniqueId().toString().equals(ownerUUID)) return true;
 
-        // GroupManager의 getPlayerGroup이 Player 객체만 받는 경우를 대비해 처리
-        String ownerGroup = null;
-        if (owner.isOnline()) {
-            ownerGroup = groupManager.getPlayerGroup(owner.getPlayer());
-        } else {
-            // OfflinePlayer 대응 메서드가 없다면 UUID로 찾는 로직이 GroupManager에 있어야 합니다.
-            // 현재는 에러 방지를 위해 아래와 같이 작성합니다.
-            ownerGroup = groupManager.getPlayerGroup((Player) owner); // 캐스팅 시도 또는 별도 로직 필요
-        }
-
+        // 2. 그룹원인지 확인
+        String ownerGroup = groupManager.getGroupViaUUID(ownerUUID);
         String playerGroup = groupManager.getPlayerGroup(p);
 
         return ownerGroup != null && ownerGroup.equals(playerGroup);
     }
-
-    @EventHandler(priority = EventPriority.HIGHEST)
-    public void onInteract(PlayerInteractEvent e) {
-        if (e.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) return;
-
-        Block b = e.getClickedBlock();
-        if (b == null) return;
-
-        Player player = e.getPlayer();
-        ItemStack mainHand = player.getInventory().getItemInMainHand();
-
-        // --- [1. 좌클릭: 나무판자 수리 로직] ---
-        if (e.getAction() == Action.LEFT_CLICK_BLOCK) {
-            if (b.getType().name().contains("_PLANKS") && mainHand.getType() == Material.STICK) {
-                String pKey = "planks." + blockToKey(b);
-
-                if (getConfig().contains(pKey)) {
-                    // 수리 로직 실행 시 이벤트 취소 (블록 파괴/타격 방지)
-                    e.setCancelled(true);
-
-                    int maxHp = 50;
-                    int currentHp = getConfig().getInt(pKey + ".health", maxHp);
-
-                    if (currentHp >= maxHp) {
-                        player.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent.fromLegacyText("§a[Plank] 이미 체력이 가득 차 있습니다."));
-                        return;
-                    }
-
-                    int repairCost = getConfig().getInt("plank-settings.repair-cost", 1);
-                    int repairAmt = getConfig().getInt("plank-settings.repair-amount", 10);
-
-                    if (hasEnoughPlanks(player, repairCost)) {
-                        removePlanks(player, repairCost);
-                        int newHp = Math.min(maxHp, currentHp + repairAmt);
-                        getConfig().set(pKey + ".health", newHp);
-                        saveConfig();
-
-                        String progressBar = getProgressBar(newHp, maxHp);
-                        player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                                TextComponent.fromLegacyText("§b[Plank] 수리 완료! (-" + repairCost + "개) " + progressBar + " §f(" + newHp + " / " + maxHp + ")"));
-                        player.playSound(b.getLocation(), Sound.BLOCK_WOOD_PLACE, 1.0f, 1.2f);
-                        b.getWorld().spawnParticle(Particle.VILLAGER_HAPPY, b.getLocation().add(0.5, 0.5, 0.5), 10, 0.3, 0.3, 0.3);
-                    } else {
-                        player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                                TextComponent.fromLegacyText("§c[Plank] 수리하려면 나무판자가 " + repairCost + "개 필요합니다!"));
-                    }
-                }
-            }
-            return; // 좌클릭 처리가 끝났으므로 종료
-        }
-
-        // --- [2. 우클릭: 문 잠금 및 상호작용 로직] ---
-        if (e.getAction() == Action.RIGHT_CLICK_BLOCK) {
-            // 문 관련 로직이므로 블록이 문이 아니면 여기서 종료
-            if (!b.getType().name().contains("_DOOR")) return;
-
-            Block bottom = getBottom(b);
-            String key = "doors." + blockToKey(bottom);
-
-            // 막대기 체크 (상태 확인 및 철거)
-            if (mainHand.getType() == Material.STICK) {
-                if (getConfig().contains(key)) {
-                    e.setCancelled(true);
-                    if (player.isSneaking()) {
-                        if (canAccess(player, key)) {
-                            getConfig().set(key, null);
-                            saveConfig();
-                            bottom.setType(Material.AIR);
-                            bottom.getRelative(0, 1, 0).setType(Material.AIR);
-                            player.sendMessage("§a[Lock] 문을 성공적으로 철거했습니다.");
-                            player.playSound(bottom.getLocation(), Sound.BLOCK_WOOD_BREAK, 1.0f, 0.8f);
-                        } else {
-                            player.sendMessage("§c[Lock] 타인의 문은 철거할 수 없습니다.");
-                        }
-                    } else {
-                        int hp = getConfig().getInt(key + ".health", MAX_HP);
-                        String progressBar = getProgressBar(hp, MAX_HP);
-                        player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                                TextComponent.fromLegacyText("§6[Lock] 남은 체력: " + progressBar + " §f(" + hp + " / " + MAX_HP + ")"));
-                    }
-                }
-                return;
-            }
-
-            // 잠금 설정 로직 (Blaze Rod 등)
-            if (!getConfig().contains(key)) {
-                if (mainHand.getType() == Material.BLAZE_ROD) {
-                    mainHand.setAmount(mainHand.getAmount() - 1);
-                    getConfig().set(key + ".owner", player.getUniqueId().toString());
-                    getConfig().set(key + ".health", MAX_HP);
-                    saveConfig();
-                    String groupName = groupManager.getPlayerGroup(player);
-                    player.sendMessage(groupName != null ? "§6[Lock] '" + groupName + "' 그룹 전용 문으로 잠갔습니다!" : "§6[Lock] 개인용 문으로 잠갔습니다!");
-                    e.setCancelled(true);
-                } else if (b.getType() == Material.IRON_DOOR) {
-                    e.setCancelled(true);
-                    toggleDoor(bottom);
-                }
-                return;
-            }
-
-            // 권한 확인 및 문 열기
-            if (canAccess(player, key)) {
-                if (b.getType() == Material.IRON_DOOR) {
-                    e.setCancelled(true);
-                    toggleDoor(bottom);
-                }
-            } else {
-                e.setCancelled(true);
-                player.sendMessage("§c[Lock] 권한이 없습니다.");
-            }
-        }
-    }
-
-    private boolean hasEnoughPlanks(Player player, int amount) {
+    public boolean hasEnoughPlanks(Player player, int amount) {
         int count = 0;
         for (ItemStack item : player.getInventory().getContents()) {
             if (item != null && item.getType().name().contains("_PLANKS")) {
@@ -766,7 +685,34 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         return count >= amount;
     }
 
-    private void removePlanks(Player player, int amount) {
+    public boolean hasItem(Player p, Material type, int amount) {
+        int count = 0;
+        for (ItemStack i : p.getInventory().getContents()) {
+            if (i != null && i.getType() == type) count += i.getAmount();
+        }
+        return count >= amount;
+    }
+
+    public void removeItem(Player p, Material type, int amount) {
+        int toRemove = amount;
+        ItemStack[] contents = p.getInventory().getContents();
+        for (int i = 0; i < contents.length; i++) {
+            ItemStack item = contents[i];
+            if (item != null && item.getType() == type) {
+                if (item.getAmount() > toRemove) {
+                    item.setAmount(item.getAmount() - toRemove);
+                    break;
+                } else {
+                    toRemove -= item.getAmount();
+                    contents[i] = null;
+                }
+            }
+            if (toRemove <= 0) break;
+        }
+        p.getInventory().setContents(contents);
+    }
+
+    public void removePlanks(Player player, int amount) {
         int toRemove = amount;
         ItemStack[] contents = player.getInventory().getContents();
         for (int i = 0; i < contents.length; i++) {
@@ -798,340 +744,232 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         Block b = world.getBlockAt(x, y, z);
 
         if (type.equals("door")) {
-            getConfig().set("doors." + key, null);
+            // [수정] dataStorage에서 삭제
+            dataStorage.getConfig().set("doors." + key, null);
             b.setType(Material.AIR);
             Block top = b.getRelative(0, 1, 0);
             if (top.getType().name().contains("_DOOR")) top.setType(Material.AIR);
             world.playSound(b.getLocation(), Sound.BLOCK_WOOD_BREAK, 1.0f, 0.5f);
         } else {
-            // [수정] 블록 타입 체크 후 사운드 결정
             Sound s = (b.getType() == Material.IRON_BLOCK) ? Sound.BLOCK_METAL_BREAK : Sound.BLOCK_WOOD_BREAK;
-            getConfig().set("planks." + key, null);
+            // [수정] dataStorage에서 삭제
+            dataStorage.getConfig().set("planks." + key, null);
             b.setType(Material.AIR);
             world.playSound(b.getLocation(), s, 1.0f, 0.5f);
         }
-        saveConfig(); // 변경사항 저장
+        dataStorage.saveConfig(); // 변경사항 저장
     }
 
-    @EventHandler
-    public void onBreak(BlockBreakEvent e) {
-        Block b = e.getBlock();
-        Player player = e.getPlayer();
-        String key = "";
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onHit(PlayerInteractEvent e) {
+        // 1. 왼쪽 클릭(블록 타격)이 아니면 무시
+        if (e.getAction() != Action.LEFT_CLICK_BLOCK) return;
 
-        // 1. 문(Door) 처리 로직
-        if (b.getType().name().contains("_DOOR")) {
-            Block bottom = getBottom(b);
-            key = "doors." + blockToKey(bottom);
-            if (!getConfig().contains(key)) return;
-
-            e.setCancelled(true); // 즉시 파괴 방지
-            int dmg = getWeaponDamage(player);
-            applyDmg(bottom, dmg, player); // 문 데미지 적용
-        }
-
-        // 2. 철 블록(IRON_BLOCK) 처리 로직 추가
-        else if (b.getType() == Material.IRON_BLOCK) {
-            key = "planks." + blockToKey(b); // IronBlockManager와 동일한 키 사용
-            if (!getConfig().contains(key)) return;
-
-            e.setCancelled(true); // 즉시 파괴 방지
-            int dmg = getWeaponDamage(player);
-            applyPlankDmg(b, dmg, player); // 판자/블록 데미지 적용 메서드 활용
-        }
-    }
-
-    // 무기별 데미지 값을 가져오는 보조 메서드 (코드 중복 방지)
-    private int getWeaponDamage(Player player) {
-        return getConfig().getInt("damage-settings." + player.getInventory().getItemInMainHand().getType().name(),
-                getConfig().getInt("damage-settings.DEFAULT", 1));
-    }
-
-    @EventHandler
-    public void onExplode(EntityExplodeEvent e) {
-        int dmg = getConfig().getInt("tnt-settings.기본", 10);
-        if (e.getEntity() instanceof org.bukkit.entity.TNTPrimed tnt && tnt.getCustomName() != null) {
-            dmg = getConfig().getInt("tnt-settings." + tnt.getCustomName(), dmg);
-        }
-
-        // BedManager는 double을 받고, Plank는 int를 받으므로 여기서 정리
-        final double bedDmg = (double) dmg;
-        final int plankDmg = dmg;
-
-        e.blockList().removeIf(b -> {
-            // 침대 처리
-            if (b.getType().name().contains("_BED")) {
-                if (this.bedManager != null) {
-                    this.bedManager.applyBedExplodeDamage(b, bedDmg);
-                }
-                return true;
-            }
-
-            // 문 처리
-            if (b.getType().name().contains("_DOOR")) {
-                applyDmg(getBottom(b), plankDmg, null);
-                return true;
-            }
-
-            // 나무판자 처리
-            if (b.getType().name().contains("_PLANKS")) {
-                String pKey = "planks." + blockToKey(b);
-                if (getConfig().contains(pKey)) {
-                    applyPlankDmg(b, plankDmg, null); // 367번 라인 에러 해결 (int로 전달)
-                    return true;
-                }
-            }
-            return true; // 지형 보호
-        });
-    }
-
-    // 나무판자 데미지 통합 메서드 (PlankHealthManager에서도 호출 가능하도록 public)
-    public void applyPlankDmg(Block b, int d, Player p) {
-        String key = "planks." + blockToKey(b);
-
-        // 1. 블록 타입에 따른 최대 체력 설정 (구분 로직)
-        int maxHp = (b.getType() == Material.IRON_BLOCK) ? 200 : 50;
-
-        // 현재 체력 가져오기 (데이터가 없으면 maxHp로 초기화)
-        int currentHp = getConfig().getInt(key + ".health", maxHp);
-        int newHp = currentHp - d;
-
-        if (newHp <= 0) {
-            // 파괴 처리
-            getConfig().set(key, null);
-            b.setType(Material.AIR);
-
-            // 블록 타입에 따른 파괴 소리 구분
-            Sound breakSound = (b.getType() == Material.IRON_BLOCK) ? Sound.BLOCK_METAL_BREAK : Sound.BLOCK_WOOD_BREAK;
-            b.getWorld().playSound(b.getLocation(), breakSound, 1.0f, 1.0f);
-
-            if (p != null) {
-                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText("§c[System] 블록이 완전히 파괴되었습니다!"));
-            }
-        } else {
-            // 체력 업데이트 및 표시
-            getConfig().set(key + ".health", newHp);
-
-            if (p != null) {
-                // 블록 타입에 따른 접두사 및 색상 구분
-                String prefix = (b.getType() == Material.IRON_BLOCK) ? "§6[Iron]" : "§6[Plank]";
-                String progressBar = getProgressBar(newHp, maxHp); // 수정된 maxHp 전달
-
-                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText(prefix + " 남은 체력 " + progressBar + " §f(" + newHp + " / " + maxHp + ")"));
-            }
-
-            // 타격 소리 구분
-            Sound hitSound = (b.getType() == Material.IRON_BLOCK) ? Sound.BLOCK_METAL_HIT : Sound.BLOCK_WOOD_HIT;
-            b.getWorld().playSound(b.getLocation(), hitSound, 1.0f, 0.8f);
-        }
-        saveConfig();
-    }
-
-    private void applyDmg(Block b, int d, Player p) {
-        String key = "doors." + blockToKey(b);
-        int hp = getConfig().getInt(key + ".health", MAX_HP) - d;
-
-        if (hp <= 0) {
-            getConfig().set(key, null);
-            b.setType(Material.AIR);
-            b.getRelative(0,1,0).setType(Material.AIR);
-
-            if (p != null) {
-                // 파괴 시 액션바 메시지
-                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText("§c[Lock] 문이 완전히 파괴되었습니다!"));
-            }
-        } else {
-            getConfig().set(key + ".health", hp);
-
-            if (p != null) {
-                // [수정] 채팅 대신 화면 중앙 액션바에 표시
-                String progressBar = getProgressBar(hp, MAX_HP);
-                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText("§6[Lock] 남은 체력: " + progressBar + " §f(" + hp + " / " + MAX_HP + ")"));
-            }
-
-            // 문 타격 소리 및 효과 유지
-            b.getWorld().playSound(b.getLocation(), Sound.BLOCK_METAL_HIT, 1.0f, 0.5f);
-            b.getWorld().spawnParticle(Particle.CRIT, b.getLocation().add(0.5, 0.5, 0.5), 10);
-        }
-        saveConfig();
-    }
-
-    private void toggleDoor(Block b) {
-        if (!(b.getBlockData() instanceof Door data)) return;
-        boolean next = !data.isOpen();
-        getServer().getScheduler().runTaskLater(this, () -> {
-            update(b, next); update(b.getRelative(0,1,0), next);
-            b.getWorld().playSound(b.getLocation(), next ? Sound.BLOCK_IRON_DOOR_OPEN : Sound.BLOCK_IRON_DOOR_CLOSE, 1f, 1f);
-        }, 1L);
-    }
-
-    private void update(Block b, boolean o) {
-        if (b.getBlockData() instanceof Door d) {
-            d.setOpen(o); d.setPowered(o);
-            b.setBlockData(d, false);
-            b.getWorld().getPlayers().forEach(p -> p.sendBlockChange(b.getLocation(), d));
-        }
-    }
-
-    private Block getBottom(Block b) {
-        return (b.getBlockData() instanceof Bisected bi && bi.getHalf() == Bisected.Half.TOP) ? b.getRelative(0,-1,0) : b;
-    }
-
-    public String blockToKey(Block b) { // private -> public
-        Location l = b.getLocation();
-        return l.getWorld().getName() + "_" + l.getBlockX() + "_" + l.getBlockY() + "_" + l.getBlockZ();
-    }
-    // 블럭 설치 시 보호 구역 확인
-    @EventHandler(priority = EventPriority.HIGH) // PlankHealthManager보다 먼저 실행되도록 설정
-    public void onBlockPlace(BlockPlaceEvent e) {
-        // 덫상자 설치 시에는 보호 체크를 통과시킴
-        if (e.getBlock().getType() == Material.TRAPPED_CHEST) {
-            return;
-        }
-
-        if (isProtectedLocation(e.getPlayer(), e.getBlock().getLocation())) {
-            e.setCancelled(true); // 이벤트를 취소함
-            e.getPlayer().sendMessage("§c[Protect] 이 지역은 보호 구역입니다.");
-        }
-    }
-
-    // 1. 덫상자 클릭 시 권한 부여 (방문자 등록)
-    @EventHandler
-    public void onProtectorInteract(PlayerInteractEvent e) {
-        if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         Block b = e.getClickedBlock();
-        if (b == null || b.getType() != Material.TRAPPED_CHEST) return;
+        if (b == null) return;
 
-        String key = "protectors." + blockToKey(b);
-        if (!getConfig().contains(key)) return;
+        Player player = e.getPlayer();
 
-        Player p = e.getPlayer();
-        List<String> authUsers = getConfig().getStringList(key + ".authorized_users");
-        String pUUID = p.getUniqueId().toString();
+        // 2. 중복 방지 쿨타임 (0.15초로 약간 늘림)
+        long now = System.currentTimeMillis();
+        if (breakCooldown.getOrDefault(player.getUniqueId(), 0L) > now) return;
+        breakCooldown.put(player.getUniqueId(), now + 150);
 
-        // 명단에 없으면 추가
-        if (!authUsers.contains(pUUID)) {
-            authUsers.add(pUUID);
-            getConfig().set(key + ".authorized_users", authUsers);
-            saveConfig();
-            p.sendMessage("§a[Protect] 덫상자를 확인하여 이 지역의 보호 권한을 획득했습니다!");
+        String plankKey = "planks." + blockToKey(b);
+        String doorKey = "doors." + blockToKey(getBottom(b));
+
+        // 설정값 가져오기 (기본 1)
+        int damage = getConfig().getInt("damage-settings.DEFAULT", 1);
+
+        // 3. 데미지 적용 및 이벤트 취소 (블록이 바로 안 깨지게)
+        if (dataStorage.getConfig().contains(plankKey)) {
+            e.setCancelled(true);
+            applyPlankDmg(b, damage, player);
+        } else if (dataStorage.getConfig().contains(doorKey)) {
+            e.setCancelled(true);
+            applyDmg(getBottom(b), damage, player);
         }
     }
 
-    // 2. 보호 구역 확인 로직 수정 (명단 체크)
-    private boolean isProtectedLocation(Player player, Location loc) {
-        if (player.isOp()) return false;
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onExplode(EntityExplodeEvent e) {
+        // 1. 기본 데미지 설정 (tnt-settings.기본 값이 없으면 10)
+        int dmg = getConfig().getInt("tnt-settings.기본", 10);
 
-        ConfigurationSection protectors = getConfig().getConfigurationSection("protectors");
-        if (protectors == null) return false;
+        if (e.getEntity() != null) {
+            // 엔티티의 타입을 문자열로 가져옴 (예: JEG_ROCKET)
+            String entityName = e.getEntity().getType().name().toUpperCase();
 
-        for (String key : protectors.getKeys(false)) {
-            String worldName = protectors.getString(key + ".world");
-            if (worldName == null || !worldName.equals(loc.getWorld().getName())) continue;
-
-            int x = protectors.getInt(key + ".x");
-            int y = protectors.getInt(key + ".y");
-            int z = protectors.getInt(key + ".z");
-            Location protectorLoc = new Location(loc.getWorld(), x, y, z);
-
-            if (protectorLoc.distance(loc) <= 15) {
-                // 수정된 부분: 해당 상자의 권한 명단(authorized_users)에 포함되어 있는지 확인
-                List<String> authUsers = getConfig().getStringList("protectors." + key + ".authorized_users");
-                if (authUsers.contains(player.getUniqueId().toString())) {
-                    return false; // 명단에 있으면 보호 구역이 아님 (설치/파괴 가능)
-                }
-                return true; // 명단에 없으면 보호 구역임
+            if (entityName.contains("ROCKET")) {
+                dmg = getConfig().getInt("explosion-settings.rocket_launcher", 50);
+            } else if (entityName.contains("EXPLOSIVE_CHARGE")) {
+                dmg = getConfig().getInt("explosion-settings.explosive_charge", 100);
+            } else if (entityName.contains("GRENADE")) {
+                dmg = getConfig().getInt("explosion-settings.grenade", 10);
+            } else if (entityName.contains("PRIMED_TNT")) {
+                dmg = getConfig().getInt("tnt-settings.기본", 10); // 바닐라 TNT 데미지
             }
         }
-        return false;
-    }
 
-    // 2. 덫상자 파괴 및 데이터 삭제 로직 (권한 확인 추가)
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onProtectorBreak(BlockBreakEvent e) {
-        if (e.getBlock().getType() == Material.TRAPPED_CHEST) {
-            String key = "protectors." + blockToKey(e.getBlock());
+        final int finalDmg = dmg;
+        Bukkit.getLogger().info("[Debug] 적용될 최종 데미지: " + finalDmg);
 
-            // 해당 좌표에 저장된 보호 구역 데이터가 있는지 확인
-            if (getConfig().contains(key)) {
-                Player p = e.getPlayer();
-                List<String> authUsers = getConfig().getStringList(key + ".authorized_users");
+        Location center = e.getLocation();
+        int radius = 5;
 
-                // 권한자 혹은 OP만 파괴 가능
-                if (p.isOp() || authUsers.contains(p.getUniqueId().toString())) {
-                    // 핵심: 해당 덫상자 키 전체를 삭제
-                    getConfig().set(key, null);
-                    saveConfig();
-                    p.sendMessage("§e[Protect] 보호 구역 데이터가 삭제되었습니다. 이제 보호가 해제됩니다.");
-                } else {
-                    // 권한 없는 사람이 부수려 하면 취소
-                    e.setCancelled(true);
-                    p.sendMessage("§c[Protect] 이 보호 구역을 해제할 권한이 없습니다!");
-                }
-            }
-        }
-    }
+        // 2. 주변 블록 탐색 및 데미지 적용
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    Location loc = center.clone().add(x, y, z);
+                    if (loc.distance(center) > radius) continue;
 
-    // 3. 덫상자 설치 시 초기 명단 설정
-    @EventHandler
-    public void onProtectorPlace(BlockPlaceEvent e) {
-        if (e.getBlock().getType() == Material.TRAPPED_CHEST) {
-            Player p = e.getPlayer();
-            Location newLoc = e.getBlock().getLocation();
+                    Block b = loc.getBlock();
+                    Material type = b.getType();
 
-            // 1. 겹침 검사: 기존에 설치된 덫상자들 중 반경 30블록 이내에 있는 것이 있는지 확인
-            // (각 상자가 15블록씩 보호하므로, 상자 간 거리는 최소 30블록이어야 영역이 겹치지 않음)
-            ConfigurationSection protectors = getConfig().getConfigurationSection("protectors");
-            if (protectors != null) {
-                for (String key : protectors.getKeys(false)) {
-                    String worldName = protectors.getString(key + ".world");
-                    if (worldName == null || !worldName.equals(newLoc.getWorld().getName())) continue;
+                    // 판자류 체크
+                    String pKey = "planks." + blockToKey(b);
+                    if (dataStorage.getConfig().contains(pKey)) {
+                        applyPlankDmg(b, finalDmg, null);
+                    }
 
-                    int x = protectors.getInt(key + ".x");
-                    int y = protectors.getInt(key + ".y");
-                    int z = protectors.getInt(key + ".z");
-                    Location existingLoc = new Location(newLoc.getWorld(), x, y, z);
-
-                    // 상자 간의 직선 거리가 30블록 이하이면 겹치는 것으로 간주
-                    if (existingLoc.distance(newLoc) < 30) {
-                        e.setCancelled(true);
-                        p.sendMessage("§c[Protect] 주변에 다른 보호 구역(덫상자)이 너무 가깝습니다! (최소 30블록 간격 필요)");
-                        return;
+                    // 2. 문 체크 (중복 방지 로직)
+                    if (type.name().contains("_DOOR")) {
+                        // 문 데이터 가져오기
+                        if (b.getBlockData() instanceof org.bukkit.block.data.type.Door door) {
+                            // 아래쪽(BOTTOM) 블록일 때만 데미지 계산 실행
+                            if (door.getHalf() == org.bukkit.block.data.type.Door.Half.BOTTOM) {
+                                String doorKey = "doors." + blockToKey(b);
+                                if (dataStorage.getConfig().contains(doorKey)) {
+                                    applyDmg(b, finalDmg, null);
+                                }
+                            }
+                        }
                     }
                 }
             }
+        }
 
-            // 2. 설치 및 데이터 저장 (겹치지 않을 때만 실행됨)
-            String key = "protectors." + blockToKey(e.getBlock());
-            getConfig().set(key + ".world", newLoc.getWorld().getName());
-            getConfig().set(key + ".x", newLoc.getBlockX());
-            getConfig().set(key + ".y", newLoc.getBlockY());
-            getConfig().set(key + ".z", newLoc.getBlockZ());
+        // 3. 지형 보호
+        e.blockList().clear();
+        e.setYield(0.0f);
+    }
 
-            // 초기 권한 명단에 설치자 본인 추가
-            List<String> authUsers = new ArrayList<>();
-            authUsers.add(p.getUniqueId().toString());
-            getConfig().set(key + ".authorized_users", authUsers);
+    public void applyPlankDmg(Block b, int d, Player p) {
+        String key = "planks." + blockToKey(b);
+        Material type = b.getType();
+        String tName = type.name();
 
-            saveConfig();
-            p.sendMessage("§a[Protect] 덫상자 보호 구역이 설정되었습니다. (반경 15블록)");
+        // 1. 블록 등급에 따른 설정 (기존 로직 유지)
+        int maxHp = 50;
+        String prefix = "§6[Plank]";
+        Sound breakSound = Sound.BLOCK_WOOD_BREAK;
+        Sound hitSound = Sound.BLOCK_WOOD_HIT;
+
+        if (tName.contains("IRON")) {
+            maxHp = 200;
+            prefix = "§f[Iron]";
+            breakSound = Sound.BLOCK_METAL_BREAK;
+            hitSound = Sound.BLOCK_METAL_HIT;
+        } else if (tName.contains("STONE_BRICK")) {
+            maxHp = 100;
+            prefix = "§7[Stone]";
+            breakSound = Sound.BLOCK_STONE_BREAK;
+            hitSound = Sound.BLOCK_STONE_HIT;
+        }
+
+        // 2. [수정] dataStorage에서 현재 체력 가져오기
+        int currentHp = dataStorage.getConfig().getInt(key + ".health", maxHp);
+        int newHp = currentHp - d;
+
+        if (newHp <= 0) {
+            // [수정] dataStorage 데이터 삭제
+            dataStorage.getConfig().set(key, null);
+            dataStorage.saveConfig();
+
+            b.setType(Material.AIR);
+            b.getWorld().playSound(b.getLocation(), breakSound, 1.0f, 1.0f);
+            if (p != null) {
+                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                        TextComponent.fromLegacyText("§c[System] 구조물이 파괴되었습니다!"));
+            }
+        } else {
+            // [수정] dataStorage 체력 감소 저장
+            dataStorage.getConfig().set(key + ".health", newHp);
+            dataStorage.saveConfig();
+
+            if (p != null) {
+                String progressBar = getProgressBar(newHp, maxHp);
+                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                        TextComponent.fromLegacyText(prefix + " 남은 체력 " + progressBar + " §f(" + newHp + " / " + maxHp + ")"));
+            }
+            b.getWorld().playSound(b.getLocation(), hitSound, 1.0f, 0.8f);
         }
     }
+
+    public void applyDmg(Block b, int d, Player p) {
+        String key = "doors." + blockToKey(b);
+        int maxHp = b.getType().name().contains("IRON") ? 200 : 100;
+
+        // [수정] dataStorage에서 현재 체력 가져오기
+        int currentHp = dataStorage.getConfig().getInt(key + ".health", maxHp);
+        int newHp = currentHp - d;
+
+        if (newHp <= 0) {
+            // [수정] dataStorage 데이터 삭제
+            dataStorage.getConfig().set(key, null);
+            dataStorage.saveConfig();
+
+            b.setType(Material.AIR);
+            b.getRelative(0, 1, 0).setType(Material.AIR);
+
+            if (p != null) {
+                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                        TextComponent.fromLegacyText("§c[System] 문이 파괴되었습니다!"));
+            }
+            b.getWorld().playSound(b.getLocation(), Sound.BLOCK_IRON_DOOR_CLOSE, 1.0f, 0.5f);
+        } else {
+            // [수정] dataStorage 체력 업데이트
+            dataStorage.getConfig().set(key + ".health", newHp);
+            dataStorage.saveConfig();
+
+            if (p != null) {
+                String progressBar = getProgressBar(newHp, maxHp);
+                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                        TextComponent.fromLegacyText("§6[Door] 체력: " + progressBar + " §f(" + newHp + " / " + maxHp + ")"));
+            }
+            b.getWorld().playSound(b.getLocation(), Sound.BLOCK_METAL_HIT, 1.0f, 1.2f);
+            b.getWorld().spawnParticle(Particle.CRIT, b.getLocation().add(0.5, 0.5, 0.5), 5);
+        }
+    }
+
     // 체력을 시각적인 바로 변환해주는 메서드
-    private String getProgressBar(int current, int max) {
+
+    public String getProgressBar(int current, int max) {
+
         int bars = 10; // 총 칸 수
+
         int completedBars = (int) (((double) current / max) * bars);
+
         StringBuilder sb = new StringBuilder();
 
+
+
         for (int i = 0; i < bars; i++) {
+
             if (i < completedBars) sb.append("§a■"); // 남은 체력 (초록색)
+
             else sb.append("§7■"); // 깎인 체력 (회색)
+
         }
+
         return sb.toString();
+
+    }
+
+    public String blockToKey(Block b) {
+        Location l = b.getLocation();
+        return l.getWorld().getName() + "_" + l.getBlockX() + "_" + l.getBlockY() + "_" + l.getBlockZ();
     }
     @EventHandler
     public void onDrink(PlayerItemConsumeEvent event) {

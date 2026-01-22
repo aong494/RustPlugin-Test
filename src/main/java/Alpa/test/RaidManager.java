@@ -66,37 +66,30 @@ public class RaidManager {
         try { dataConfig.save(dataFile); } catch (IOException e) { e.printStackTrace(); }
     }
 
-    public void loadPlacedBoxes() {
-        // 1. 월드가 아직 준비 안 되었을 수 있으므로 1초 뒤에 실행 (비동기 방지)
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (dataConfig == null || !dataConfig.contains("placed")) return;
+    private void loadPlacedBoxes() {
+        if (dataConfig == null || !dataConfig.contains("placed")) return;
+        ConfigurationSection section = dataConfig.getConfigurationSection("placed");
 
-            ConfigurationSection section = dataConfig.getConfigurationSection("placed");
-            for (String key : section.getKeys(false)) {
-                String worldName = section.getString(key + ".world");
-                double x = section.getDouble(key + ".x");
-                double y = section.getDouble(key + ".y");
-                double z = section.getDouble(key + ".z");
-                String template = section.getString(key + ".template");
+        for (String key : section.getKeys(false)) {
+            String worldName = section.getString(key + ".world");
+            double x = section.getDouble(key + ".x");
+            double y = section.getDouble(key + ".y");
+            double z = section.getDouble(key + ".z");
+            String template = section.getString(key + ".template");
 
-                World world = Bukkit.getWorld(worldName);
-                if (world != null) {
-                    Location loc = new Location(world, x, y, z);
+            World world = Bukkit.getWorld(worldName);
+            if (world != null) {
+                Location loc = new Location(world, x, y, z);
 
-                    // ⭐ 핵심: 해당 구역 청크를 강제로 로드해야 홀로그램(엔티티)이 생성됨
-                    if (!loc.getChunk().isLoaded()) {
-                        loc.getChunk().load();
-                    }
-
-                    RaidInstance instance = new RaidInstance(loc, template);
-                    activeInstances.put(loc, instance);
-
-                    // 생성 직후 홀로그램 강제 초기화
-                    instance.updateHologram("§e우클릭 시 시작", ChatColor.YELLOW);
+                // ⭐ 추가: 홀로그램 소환 전 청크를 강제로 로드함
+                if (!loc.getChunk().isLoaded()) {
+                    loc.getChunk().load();
                 }
+
+                activeInstances.put(loc, new RaidInstance(loc, template));
             }
-            plugin.getLogger().info("[Raid] 리부팅 후 레이드 박스 복구 완료.");
-        }, 20L); // 20틱 = 1초 지연
+        }
+        plugin.getLogger().info("[Raid] " + activeInstances.size() + "개의 레이드 박스를 로드했습니다.");
     }
 
     public void createInstance(Location loc, String templateName) {
@@ -161,9 +154,9 @@ public class RaidManager {
             this.location = loc;
             this.templateName = templateName;
             // ⭐ 인스턴스 생성 시 2초 뒤 홀로그램 소환
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                updateHologram("§e우클릭 시 시작", ChatColor.YELLOW);
-            }, 40L);
+           // Bukkit.getScheduler().runTaskLater(plugin, () -> {
+          //      updateHologram("§e우클릭 시 시작", ChatColor.YELLOW);
+           // }, 40L);
         }
 
         private void removeExistingHolograms(Location loc) {
@@ -263,17 +256,15 @@ public class RaidManager {
         private void updateHologram(String text, ChatColor color) {
             if (location.getWorld() == null) return;
 
-            // 1. 청크가 로드되지 않았다면 소환이 불가능하므로 강제 로드
+            // ⭐ 추가: 소환 직전 청크 상태 확인 및 로드
             if (!location.getChunk().isLoaded()) {
                 location.getChunk().load();
             }
 
-            // 2. 기존 홀로그램이 없거나, 유효하지 않거나(죽음), 서버 리부팅으로 초기화된 경우
             if (hologram == null || !hologram.isValid() || hologram.isDead()) {
-                // 주변에 혹시 남아있을지 모르는 중복 홀로그램 제거
+                // 기존 중복 홀로그램 제거 로직 (이미 잘 만드셨으므로 유지)
                 removeExistingHolograms(location);
 
-                // 새로운 아머스탠드 소환
                 hologram = (ArmorStand) location.getWorld().spawnEntity(
                         location.clone().add(0.5, 1.2, 0.5),
                         EntityType.ARMOR_STAND
@@ -282,9 +273,10 @@ public class RaidManager {
                 hologram.setVisible(false);
                 hologram.setMarker(true);
                 hologram.setCustomNameVisible(true);
-                hologram.setPersistent(false);
+                hologram.setPersistent(false); // 재부팅 시 자동으로 사라지게 설정 (플러그인이 다시 생성하므로)
                 hologram.addScoreboardTag("raid_hologram");
             }
+            // 색상과 텍스트를 결합하여 이름 설정
             hologram.setCustomName(color + text);
         }
 
@@ -293,52 +285,88 @@ public class RaidManager {
         private void spawnMob(ConfigurationSection mobSec) {
             if (mobSec == null) return;
 
-            World world = Bukkit.getWorld(mobSec.getString("world", "world"));
-            if (world == null) world = location.getWorld();
+            // final을 추가하여 내부 스케줄러에서 참조 가능하게 변경
+            final World world = (Bukkit.getWorld(mobSec.getString("world", "world")) != null)
+                    ? Bukkit.getWorld(mobSec.getString("world", "world"))
+                    : location.getWorld();
             if (world == null) return;
 
-            // 1. 랜덤 객체 생성
             Random random = new Random();
-
-            // 2. 설정된 기준 좌표 가져오기
             double baseX = mobSec.getDouble("x", location.getX());
             double baseY = mobSec.getDouble("y", location.getY());
             double baseZ = mobSec.getDouble("z", location.getZ());
 
-            // 3. 분산 범위 설정 (예: 반경 3블록 이내 무작위)
-            // random.nextDouble() * 6 - 3 은 -3.0에서 +3.0 사이의 값을 반환합니다.
             double offsetX = (random.nextDouble() * 6) - 3;
             double offsetZ = (random.nextDouble() * 6) - 3;
-
-            // 4. 최종 소환 위치 계산 (Y값은 끼임 방지를 위해 0.5~1 정도 높여주는 것이 좋습니다)
             Location spawnLoc = new Location(world, baseX + offsetX, baseY + 0.5, baseZ + offsetZ);
 
             try {
                 String typeStr = mobSec.getString("type", "HUSK").toUpperCase();
                 LivingEntity mob = (LivingEntity) world.spawnEntity(spawnLoc, EntityType.valueOf(typeStr));
 
-                mob.setCustomName(ChatColor.translateAlternateColorCodes('&', mobSec.getString("name", "")));
-                mob.setCustomNameVisible(true);
+                // mob.setCustomName(ChatColor.translateAlternateColorCodes('&', mobSec.getString("name", "")));
+                // mob.setCustomNameVisible(true);
                 mob.addScoreboardTag("raid_mob");
                 mob.addScoreboardTag("raid_mob_" + templateName);
 
-                // 3. 체력 및 속도 설정
                 double hp = mobSec.getDouble("hp", 20.0);
                 mob.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(hp);
                 mob.setHealth(hp);
                 mob.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(mobSec.getDouble("speed", 0.2));
 
-                // 4. ⭐ 작동 확인된 장비 설정 로직 그대로 적용
+                if (mob.getAttribute(Attribute.GENERIC_FOLLOW_RANGE) != null) {
+                    mob.getAttribute(Attribute.GENERIC_FOLLOW_RANGE).setBaseValue(50.0);
+                }
+
+                Player target = world.getPlayers().stream()
+                        .filter(p -> p.getGameMode() == GameMode.SURVIVAL || p.getGameMode() == GameMode.ADVENTURE)
+                        .min(java.util.Comparator.comparingDouble(p -> p.getLocation().distanceSquared(spawnLoc)))
+                        .orElse(null);
+
+                if (target != null && mob instanceof org.bukkit.entity.Mob) {
+                    ((org.bukkit.entity.Mob) mob).setTarget(target);
+                }
+
+                // --- 장비 설정 및 데미지 증폭 (방법 2) ---
                 if (mob.getEquipment() != null) {
-                    // 무기 설정
                     String weaponName = mobSec.getString("weapon", "AIR");
-                    Material weaponMat = Material.matchMaterial(weaponName); // 사용자님의 기존 방식
+                    new org.bukkit.scheduler.BukkitRunnable() {
+                        @Override
+                        public void run() {
+                            // 1. 몹이 죽었거나, 유효하지 않거나, 월드에서 사라지면 루프 종료
+                            if (mob == null || mob.isDead() || !mob.isValid()) {
+                                this.cancel();
+                                return;
+                            }
+
+                            // 2. 공격 속도(사격 간격)를 계속 최대로 고정
+                            // API를 직접 사용하므로 "개체 데이터를 수정했습니다" 메시지가 뜨지 않습니다.
+                            if (mob.getAttribute(org.bukkit.attribute.Attribute.GENERIC_ATTACK_SPEED) != null) {
+                                mob.getAttribute(org.bukkit.attribute.Attribute.GENERIC_ATTACK_SPEED).setBaseValue(100.0);
+                            }
+
+                            // 3. (추가) 몹이 타겟을 놓치지 않도록 인식 범위 재확인
+                            if (mob instanceof org.bukkit.entity.Mob) {
+                                org.bukkit.entity.Mob m = (org.bukkit.entity.Mob) mob;
+                                // 타겟이 죽었거나 없으면 근처 플레이어로 다시 지정
+                                if (m.getTarget() == null || m.getTarget().isDead()) {
+                                    Player p = world.getPlayers().stream()
+                                            .filter(player -> player.getGameMode() == org.bukkit.GameMode.SURVIVAL)
+                                            .findFirst().orElse(null);
+                                    if (p != null) m.setTarget(p);
+                                }
+                            }
+                        }
+                    }.runTaskTimer(plugin, 0L, 20L); // 1초(20틱)마다 체크 (성능을 위해 간격을 늘렸습니다)
+
+                    Material weaponMat = Material.matchMaterial(weaponName);
+
                     if (weaponMat != null && weaponMat != Material.AIR) {
-                        mob.getEquipment().setItemInMainHand(new ItemStack(weaponMat));
+                        ItemStack gun = new ItemStack(weaponMat);
+                        mob.getEquipment().setItemInMainHand(gun);
                         mob.getEquipment().setItemInMainHandDropChance(0f);
                     }
 
-                    // 방어구 설정
                     ConfigurationSection armor = mobSec.getConfigurationSection("armor");
                     if (armor != null) {
                         setEquipment(mob, "helmet", armor.getString("helmet"));
