@@ -45,6 +45,8 @@ public class PlankToIronManager implements Listener {
 
         Player player = e.getPlayer();
         ItemStack mainHand = player.getInventory().getItemInMainHand();
+
+        // 막대기를 들고 있을 때만 작동
         if (mainHand.getType() != Material.STICK) return;
 
         // 1. 데이터 위치 확인 (dataStorage 사용)
@@ -52,9 +54,11 @@ public class PlankToIronManager implements Listener {
         String pPath = "planks." + blockKey;
         if (!plugin.dataStorage.getConfig().contains(pPath)) return;
 
-        // 2. 권한 체크 (본인/그룹원 아니면 취소)
+        // 2. 권한 체크
         if (!plugin.canAccess(player, blockKey, "planks")) {
-            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent.fromLegacyText("§c[System] 관리 권한이 없습니다."));
+            String errorName = plugin.dataStorage.getConfig().getString(pPath + ".display_name", "구조물");
+            player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                    TextComponent.fromLegacyText("§c[" + errorName + "] 관리 권한이 없습니다."));
             e.setCancelled(true);
             return;
         }
@@ -62,33 +66,61 @@ public class PlankToIronManager implements Listener {
         e.setCancelled(true);
         String typeName = b.getType().name();
 
-        int maxHp = WOOD_MAX_HP;
-        Material repairMat = null;
-        String displayName = "나무";
-        String settingKey = "plank-settings";
+        // --- 3. 데이터 로드 (이름 버그 해결) ---
+        // data.yml에서 저장된 이름을 먼저 가져오고, 없으면 재질로 판단
+        String displayName = plugin.dataStorage.getConfig().getString(pPath + ".display_name");
+        int maxHp = plugin.dataStorage.getConfig().getInt(pPath + ".max_health", -1);
 
-        if (typeName.contains("IRON")) {
-            maxHp = IRON_MAX_HP;
+        // 4. 재질 판단 및 기본값 보정
+        Material repairMat = null;
+        String settingKey = "plank-settings";
+        if (typeName.contains("ARMORED_DOOR")) {
+            if (displayName == null) displayName = "합금 문";
+            if (maxHp == -1) maxHp = 800;
+        } else if (typeName.contains("BIG_DOOR")) {
+            if (displayName == null) displayName = "차고 문";
+            if (maxHp == -1) maxHp = 600;
+        } else if (b.getType() == Material.GOLD_BLOCK) {
+            if (displayName == null) displayName = "자동 터렛";
+            if (maxHp == -1) maxHp = IRON_MAX_HP; // 터렛은 철급 체력(200)
             repairMat = Material.IRON_INGOT;
-            displayName = "철";
             settingKey = "upgrade-settings";
-        } else if (typeName.contains("STONE_BRICK")) {
-            maxHp = STONE_MAX_HP;
+        }
+        else if (typeName.contains("IRON")) {
+            if (displayName == null) displayName = "철";
+            if (maxHp == -1) maxHp = IRON_MAX_HP; // 200
+            repairMat = Material.IRON_INGOT;
+            settingKey = "upgrade-settings";
+        }
+        else if (typeName.contains("STONE_BRICK")) {
+            if (displayName == null) displayName = "석재 벽돌";
+            if (maxHp == -1) maxHp = STONE_MAX_HP; // 100
             repairMat = Material.COBBLESTONE;
-            displayName = "석재 벽돌";
             settingKey = "stone-settings";
         }
-
-        // --- 분기 처리 ---
-        if (e.getAction() == Action.LEFT_CLICK_BLOCK && player.isSneaking()) {
-            handleUpgrade(player, b, typeName, pPath); // pPath를 넘겨주도록 수정
+        else {
+            if (displayName == null) displayName = "나무";
+            if (maxHp == -1) maxHp = WOOD_MAX_HP; // 50
         }
+
+        // --- 5. 상호작용 분기 처리 ---
+
+        // 좌클릭 + 쉬프트: 업그레이드
+        if (e.getAction() == Action.LEFT_CLICK_BLOCK && player.isSneaking()) {
+            handleUpgrade(player, b, typeName, pPath);
+        }
+        // 좌클릭: 수리 (철괴 소모 로직 포함)
         else if (e.getAction() == Action.LEFT_CLICK_BLOCK) {
             handleRepair(player, b, pPath, maxHp, repairMat, displayName, settingKey);
         }
+        // 우클릭: 정보 확인 및 철거
         else if (e.getAction() == Action.RIGHT_CLICK_BLOCK) {
             if (player.isSneaking()) {
-                // 철거 (dataStorage에서 삭제)
+                // 터렛 모델 제거 및 아이템 드롭
+                if (b.getType() == Material.GOLD_BLOCK) {
+                    plugin.turretManager.removeTurret(b.getLocation());
+                    plugin.turretManager.dropTurretItems(b.getLocation());
+                }
                 plugin.dataStorage.getConfig().set(pPath, null);
                 plugin.dataStorage.saveConfig();
                 b.setType(Material.AIR);
@@ -99,7 +131,7 @@ public class PlankToIronManager implements Listener {
                 int currentHp = plugin.dataStorage.getConfig().getInt(pPath + ".health", maxHp);
                 String progressBar = plugin.getProgressBar(currentHp, maxHp);
                 player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText("§f[" + displayName + "] 체력: " + progressBar + " §f(" + currentHp + " / " + maxHp + ")"));
+                        TextComponent.fromLegacyText("§f[" + displayName + "] " + progressBar + " §f(" + currentHp + " / " + maxHp + ")"));
             }
         }
     }
@@ -131,32 +163,41 @@ public class PlankToIronManager implements Listener {
     }
 
     private void handleRepair(Player player, Block b, String pKey, int maxHp, Material repairMat, String displayName, String settingKey) {
-        int currentHp = plugin.getConfig().getInt(pKey + ".health", maxHp);
-        if (currentHp >= maxHp) {
-            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent.fromLegacyText("§a[" + displayName + "] 체력이 가득 차 있습니다."));
+        int currentHp = plugin.dataStorage.getConfig().getInt(pKey + ".health", maxHp);
+        int actualMaxHp = plugin.dataStorage.getConfig().getInt(pKey + ".max_health", maxHp);
+        int repairAmt = plugin.getConfig().getInt(settingKey + ".repair-amount", 10);
+        int repairCost = plugin.getConfig().getInt(settingKey + ".repair-cost", 1);
+        if (currentHp > (actualMaxHp - repairAmt)) {
+            if (currentHp >= actualMaxHp) {
+                player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                        TextComponent.fromLegacyText("§a[" + displayName + "] 체력이 가득 차 있습니다."));
+            } else {
+                player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                        TextComponent.fromLegacyText("§e[" + displayName + "] 조금 더 파손되어야 수리할 수 있습니다. §f(최소 " + repairAmt + " 데미지 필요)"));
+            }
             return;
         }
 
-        int repairCost = plugin.getConfig().getInt(settingKey + ".repair-cost", 1);
-        int repairAmt = plugin.getConfig().getInt(settingKey + ".repair-amount", 10);
-
+        // 3. 재료 확인 및 차감 로직 (기존과 동일)
         boolean hasMat = (repairMat != null) ? plugin.hasItem(player, repairMat, repairCost) : plugin.hasEnoughPlanks(player, repairCost);
 
         if (hasMat) {
             if (repairMat != null) plugin.removeItem(player, repairMat, repairCost);
             else plugin.removePlanks(player, repairCost);
 
-            int newHp = Math.min(maxHp, currentHp + repairAmt);
-            plugin.getConfig().set(pKey + ".health", newHp);
-            plugin.saveConfig();
+            int newHp = Math.min(actualMaxHp, currentHp + repairAmt);
+            plugin.dataStorage.getConfig().set(pKey + ".health", newHp);
+            plugin.dataStorage.saveConfig();
 
             player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                    TextComponent.fromLegacyText("§b[" + displayName + "] 수리 완료! " + plugin.getProgressBar(newHp, maxHp) + " §f(" + newHp + " / " + maxHp + ")"));
-            Sound s = (maxHp == IRON_MAX_HP) ? Sound.BLOCK_ANVIL_USE : (maxHp == STONE_MAX_HP ? Sound.BLOCK_STONE_PLACE : Sound.BLOCK_WOOD_PLACE);
+                    TextComponent.fromLegacyText("§b[" + displayName + "] 수리 완료! " + plugin.getProgressBar(newHp, actualMaxHp) + " §f(" + newHp + " / " + actualMaxHp + ")"));
+
+            Sound s = (b.getType() == Material.GOLD_BLOCK || actualMaxHp >= 200) ? Sound.BLOCK_ANVIL_USE : Sound.BLOCK_WOOD_PLACE;
             player.playSound(b.getLocation(), s, 1.0f, 1.2f);
         } else {
-            String matName = (repairMat == Material.COBBLESTONE) ? "조약돌" : (repairMat == Material.IRON_INGOT ? "철괴" : "나무판자");
-            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent.fromLegacyText("§c[" + displayName + "] 수리 재료 부족 (" + matName + " " + repairCost + "개 필요)"));
+            String matName = (repairMat == Material.IRON_INGOT) ? "철괴" : (repairMat == Material.COBBLESTONE ? "조약돌" : "나무판자");
+            player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                    TextComponent.fromLegacyText("§c[" + displayName + "] 수리 재료 부족 (" + matName + " " + repairCost + "개 필요)"));
         }
     }
 

@@ -35,6 +35,7 @@ public class ElectricManager implements Listener {
 
     // 와이어 연결 중인 플레이어 상태 (UUID -> 시작 블록 위치)
     private final Map<UUID, Location> wiringSession = new HashMap<>();
+    private final Set<String> poweredTurrets = new HashSet<>();
 
     // 설정값 캐싱
     private int solarGen, windGen, fuelGen;
@@ -66,7 +67,7 @@ public class ElectricManager implements Listener {
     }
 
     // --- [1] 핵심 데이터 클래스 ---
-    public enum CompType { GENERATOR, BATTERY, CONSUMER, SWITCH, RELAY }
+    public enum CompType { GENERATOR, BATTERY, CONSUMER, SWITCH, RELAY, TURRET }
 
     public class ElectricComponent {
         Location loc;
@@ -74,6 +75,7 @@ public class ElectricManager implements Listener {
         String subType; // solar, wind, fuel, small_bat, large_bat 등
         int currentPower = 0;
         int maxPower = 0;
+        double currentEfficiency = 1.0;
         List<String> outputs = new ArrayList<>(); // 연결된 블록들의 좌표 키(Key)
 
         public ElectricComponent(Location loc, CompType type, String subType) {
@@ -92,34 +94,65 @@ public class ElectricManager implements Listener {
             @Override
             public void run() {
                 Set<String> poweredLamps = new HashSet<>();
-                activeRelays.clear(); // 틱 시작 시 활성화된 중계기 목록 초기화
+                poweredTurrets.clear();
+                activeRelays.clear();
 
-                // 1단계: 발전기 -> 배터리 충전 (기존과 동일)
+                Iterator<Map.Entry<String, ElectricComponent>> it = components.entrySet().iterator();
+                while (it.hasNext()) {
+                    Map.Entry<String, ElectricComponent> entry = it.next();
+                    ElectricComponent comp = entry.getValue();
+                    Material currentMat = comp.loc.getBlock().getType();
+                    if (currentMat == Material.AIR) {
+                        for (ElectricComponent other : components.values()) {
+                            other.outputs.remove(entry.getKey());
+                        }
+                        it.remove();
+                        saveBlocks();
+                        continue;
+                    }
+                }
+
+                // 1단계: 발전기 -> 배터리 충전
                 for (ElectricComponent comp : components.values()) {
                     if (comp.type == CompType.GENERATOR) {
                         int generated = 0;
                         Block b = comp.loc.getBlock();
+
+                        // 1. 태양광 로직
                         if (comp.subType.equals("solar") && b.getType() == Material.DAYLIGHT_DETECTOR) {
-                            if (b.getWorld().getTime() < 12300 && b.getLightFromSky() > 10) generated = solarGen;
-                        } else if (comp.subType.equals("wind")) {
-                            generated = windGen;
-                        } else if (comp.subType.equals("fuel")) {
-                            if (b.getState() instanceof Furnace furnace && furnace.getBurnTime() > 0) generated = fuelGen;
+                            if (b.getWorld().getTime() < 12300 && b.getLightFromSky() > 10) {
+                                generated = solarGen;
+                            }
                         }
+                        // 2. 풍력 로직 (태양광 if문 밖으로 빼냄)
+                        else if (comp.subType.equals("wind")) {
+                            // 틱마다 계산하지 않음! 이미 저장된 효율 값만 사용
+                            generated = (int) (windGen * comp.currentEfficiency);
+
+                            if (comp.currentEfficiency >= 1.0) {
+                                b.getWorld().spawnParticle(Particle.VILLAGER_HAPPY, b.getLocation().add(0.5, 1.2, 0.5), 1, 0.1, 0.1, 0.1, 0.05);
+                            }
+                        }
+                        // 3. 화력 로직
+                        else if (comp.subType.equals("fuel")) {
+                            if (b.getState() instanceof Furnace furnace && furnace.getBurnTime() > 0) {
+                                generated = fuelGen;
+                            }
+                        }
+
                         distributePower(comp, generated);
                     }
                 }
 
-                // 2단계: 배터리 -> 출력 (중계기 포함)
+                // 2단계: 배터리 -> 출력 (기존 유지)
                 for (ElectricComponent comp : components.values()) {
                     if (comp.type == CompType.BATTERY && comp.currentPower > 0) {
-                        distributeFromBattery(comp, poweredLamps);
+                        distributeFromBattery(comp, poweredLamps, poweredTurrets);
                     }
-                    // 파티클 생성 로직 호출
                     spawnParticles(comp);
                 }
 
-                // 3단계: 미공급 램프 끄기 (기존과 동일)
+                // 3단계: 미공급 램프 끄기 (기존 유지)
                 for (ElectricComponent comp : components.values()) {
                     if (comp.type == CompType.CONSUMER) {
                         if (!poweredLamps.contains(locToKey(comp.loc))) {
@@ -130,6 +163,41 @@ public class ElectricManager implements Listener {
             }
         }.runTaskTimer(plugin, 0L, 20L);
     }
+
+    private void updateNearbyWindGenerators(Location triggerLoc) {
+        int checkRadius = 5;
+        for (ElectricComponent comp : components.values()) {
+            if (comp.type == CompType.GENERATOR && comp.subType.equals("wind")) {
+                if (comp.loc.getWorld().equals(triggerLoc.getWorld()) &&
+                        comp.loc.distance(triggerLoc) <= checkRadius) {
+                    double newEfficiency = calculateWindEfficiency(comp.loc.getBlock());
+                    comp.currentEfficiency = newEfficiency;
+                }
+            }
+        }
+    }
+    // 풍력 효율 계산
+    private double calculateWindEfficiency(Block center) {
+        int radius = 10;
+        int obstacles = 0;
+
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    if (x == 0 && y == 0 && z == 0) continue;
+                    if (center.getRelative(x, y, z).getType().isSolid()) {
+                        obstacles++;
+                    }
+                }
+            }
+        }
+
+        // 장애물 1개당 효율 3% 감소, 최소 10% 유지
+        double efficiency = 1.0 - (obstacles * 0.03);
+        return Math.max(0.1, efficiency);
+    }
+
+
 
     // 발전기에서 생산된 전력을 연결된 곳으로 보냄
     private void distributePower(ElectricComponent source, int amount) {
@@ -150,7 +218,7 @@ public class ElectricManager implements Listener {
     }
 
     // 배터리에서 전력 소비
-    private void distributeFromBattery(ElectricComponent battery, Set<String> poweredLamps) {
+    private void distributeFromBattery(ElectricComponent battery, Set<String> poweredLamps, Set<String> poweredTurrets) {
         for (String outKey : battery.outputs) {
             if (battery.currentPower <= 0) break;
             ElectricComponent target = components.get(outKey);
@@ -158,16 +226,29 @@ public class ElectricManager implements Listener {
 
             if (target.type == CompType.CONSUMER) {
                 if (consumePowerForLamp(battery, target)) poweredLamps.add(outKey);
+            }
+            else if (target.type == CompType.TURRET) {
+                if (consumePowerForTurret(battery, target)) {
+                    poweredTurrets.add(outKey);
+                }
             } else if (target.type == CompType.SWITCH) {
-                handleSwitch(battery, target, poweredLamps);
+                handleSwitch(battery, target, poweredLamps, poweredTurrets);
             } else if (target.type == CompType.RELAY) {
                 // 첫 번째 중계기 호출 (depth 1 시작)
-                handleRelay(battery, target, poweredLamps, 1);
+                handleRelay(battery, target, poweredLamps, poweredTurrets, 1);
             }
         }
     }
+    private boolean consumePowerForTurret(ElectricComponent battery, ElectricComponent turretComp) {
+        int turretCons = 5; // 나중에 turret.yml에서 읽어오도록 수정 가능
+        if (battery.currentPower >= turretCons) {
+            battery.currentPower -= turretCons;
+            return true;
+        }
+        return false;
+    }
 
-    private void handleRelay(ElectricComponent sourceBat, ElectricComponent relayComp, Set<String> poweredLamps, int depth) {
+    private void handleRelay(ElectricComponent sourceBat, ElectricComponent relayComp, Set<String> poweredLamps, Set<String> poweredTurrets, int depth) {
         if (depth > 5) return; // 5단계를 넘으면 중단 (무한 루프 방지)
 
         String relayKey = locToKey(relayComp.loc);
@@ -180,12 +261,22 @@ public class ElectricManager implements Listener {
 
             if (nextTarget.type == CompType.CONSUMER) {
                 if (consumePowerForLamp(sourceBat, nextTarget)) poweredLamps.add(nextKey);
-            } else if (nextTarget.type == CompType.SWITCH) {
-                handleSwitch(sourceBat, nextTarget, poweredLamps);
-            } else if (nextTarget.type == CompType.RELAY) {
-                handleRelay(sourceBat, nextTarget, poweredLamps, depth + 1); // 다음 단계로 전달
+            }
+            else if (nextTarget.type == CompType.TURRET) {
+                if (consumePowerForTurret(sourceBat, nextTarget)) {
+                    poweredTurrets.add(nextKey);
+                }
+            }
+            else if (nextTarget.type == CompType.SWITCH) {
+                handleSwitch(sourceBat, nextTarget, poweredLamps, poweredTurrets);
+            }
+            else if (nextTarget.type == CompType.RELAY) {
+                handleRelay(sourceBat, nextTarget, poweredLamps, poweredTurrets, depth + 1);
             }
         }
+    }
+    public boolean isPowered(Location loc) {
+        return poweredTurrets.contains(locToKey(loc));
     }
 
     // 전력 소비 성공 여부를 반환하도록 수정 (boolean)
@@ -201,23 +292,41 @@ public class ElectricManager implements Listener {
         return false; // 전력 부족
     }
 
-    // handleSwitch도 수정
-    private void handleSwitch(ElectricComponent sourceBat, ElectricComponent switchComp, Set<String> poweredLamps) {
+    private void handleSwitch(ElectricComponent sourceBat, ElectricComponent switchComp, Set<String> poweredLamps, Set<String> poweredTurrets) {
         Block b = switchComp.loc.getBlock();
         if (b.getType() != Material.LEVER) return;
 
+        // 레버 데이터 확인
         Powerable leverData = (Powerable) b.getBlockData();
-        if (!leverData.isPowered()) return; // 꺼져있으면 아무것도 안함 (전등은 3단계에서 꺼짐)
+        if (!leverData.isPowered()) return; // 레버가 꺼져 있으면 전력 전달 중단
 
-        for (String finalDestKey : switchComp.outputs) {
-            ElectricComponent finalDest = components.get(finalDestKey);
-            if (finalDest != null && finalDest.type == CompType.CONSUMER) {
-                if (consumePowerForLamp(sourceBat, finalDest)) {
-                    poweredLamps.add(finalDestKey);
+        // 스위치에 연결된 모든 출력물(outputs)을 확인
+        for (String nextKey : switchComp.outputs) {
+            if (sourceBat.currentPower <= 0) break; // 배터리 방전 시 중단
+
+            ElectricComponent nextTarget = components.get(nextKey);
+            if (nextTarget == null) continue;
+
+            // 1. 전등일 경우
+            if (nextTarget.type == CompType.CONSUMER) {
+                if (consumePowerForLamp(sourceBat, nextTarget)) {
+                    poweredLamps.add(nextKey);
                 }
+            }
+            // 2. 터렛일 경우 (추가됨)
+            else if (nextTarget.type == CompType.TURRET) {
+                if (consumePowerForTurret(sourceBat, nextTarget)) {
+                    poweredTurrets.add(nextKey);
+                }
+            }
+            // 3. 중계기일 경우 (추가됨)
+            else if (nextTarget.type == CompType.RELAY) {
+                // 스위치 다음에 중계기가 있어도 전력이 흐르도록 handleRelay 호출
+                handleRelay(sourceBat, nextTarget, poweredLamps, poweredTurrets, 1);
             }
         }
     }
+
 
     private void setLampState(Block block, boolean on) {
         if (!(block.getBlockData() instanceof Lightable)) return;
@@ -375,6 +484,7 @@ public class ElectricManager implements Listener {
 
         // 2. 기본 발전기 체크
         Material m = b.getType();
+        if (m == Material.GOLD_BLOCK) return CompType.TURRET;
         if (m == Material.DAYLIGHT_DETECTOR || m == Material.EMERALD_BLOCK ||
                 m == Material.FURNACE || m == Material.BLAST_FURNACE) return CompType.GENERATOR;
 
@@ -409,22 +519,47 @@ public class ElectricManager implements Listener {
     }
 
     // --- [4] 기타 유틸리티 (파괴, 저장, 로드, 파티클) ---
+    @EventHandler
+    public void onBlockPlace(org.bukkit.event.block.BlockPlaceEvent e) {
+        Location loc = e.getBlock().getLocation();
+        String key = locToKey(loc);
 
+        // 1. 설치된 블록이 풍력 발전기인 경우 컴포넌트 등록 및 초기 효율 설정
+        CompType type = identifyType(e.getBlock());
+        String subType = identifySubType(e.getBlock());
+
+        if (type == CompType.GENERATOR && "wind".equals(subType)) {
+            ElectricComponent newComp = new ElectricComponent(loc, type, "wind");
+            newComp.currentEfficiency = calculateWindEfficiency(e.getBlock());
+            components.put(key, newComp);
+            saveBlocks(); // 파일에 즉시 저장
+        }
+        // 이 메서드는 components에 이미 등록된 녀석들을 순회하며 효율을 깎습니다.
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                updateNearbyWindGenerators(loc);
+            }
+        }.runTaskLater(plugin, 1L); // 블록이 완전히 배치된 후 계산하도록 1틱 지연
+    }
     @EventHandler
     public void onBlockBreak(BlockBreakEvent e) {
-        String key = locToKey(e.getBlock().getLocation());
+        Location loc = e.getBlock().getLocation();
+        String key = locToKey(loc);
+
         if (components.containsKey(key)) {
-            // 1. 자신 삭제
             components.remove(key);
-
-            // 2. 다른 컴포넌트들이 나를 가리키던 연결 삭제
-            for (ElectricComponent comp : components.values()) {
-                comp.outputs.remove(key);
-            }
-
             saveBlocks();
-            e.getPlayer().sendMessage("§c[Electric] §f전력 장치가 파괴되어 연결이 끊겼습니다.");
+            e.getPlayer().sendMessage("§c[Electric] §f장치가 파괴되었습니다.");
         }
+
+        // 블록이 부서졌으니 주변 풍력기 효율이 올라갈 수 있음
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                updateNearbyWindGenerators(loc);
+            }
+        }.runTaskLater(plugin, 1L);
     }
 
     private void spawnParticles(ElectricComponent comp) {

@@ -1,6 +1,7 @@
 package Alpa.test;
 
 import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import java.util.ArrayList;
@@ -119,12 +120,18 @@ public class GroupManager {
     }
 
     // 플레이어가 속한 그룹 이름을 찾는 유틸리티 (GUI 호출용)
-    public String getPlayerGroup(Player player) {
+    public String getPlayerGroup(OfflinePlayer player) {
+        // 1. 전달받은 플레이어 객체가 null인지 가장 먼저 확인
+        if (player == null) return null;
         ConfigurationSection groups = plugin.getConfig().getConfigurationSection("groups");
         if (groups == null) return null;
+        // 2. UUID 추출 (OfflinePlayer는 접속 안 해도 UUID를 가져올 수 있음)
         String pUUID = player.getUniqueId().toString();
         for (String gName : groups.getKeys(false)) {
-            if (groups.getStringList(gName + ".members").contains(pUUID)) return gName;
+            List<String> members = groups.getStringList(gName + ".members");
+            if (members.contains(pUUID)) {
+                return gName;
+            }
         }
         return null;
     }

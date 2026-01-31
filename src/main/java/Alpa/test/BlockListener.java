@@ -36,12 +36,6 @@ public class BlockListener implements Listener {
             Material.SAND,
             Material.SNOW_BLOCK,
             Material.CYAN_TERRACOTTA,
-            Material.OAK_SAPLING,
-            Material.SPRUCE_SAPLING,
-            Material.BIRCH_SAPLING,
-            Material.JUNGLE_SAPLING,
-            Material.ACACIA_SAPLING,
-            Material.DARK_OAK_SAPLING,
             Material.MANGROVE_PROPAGULE,
             Material.GRANITE,
             Material.DIORITE,
@@ -88,41 +82,70 @@ public class BlockListener implements Listener {
     public void onBlockBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
         Block block = event.getBlock();
+        Location loc = block.getLocation();
+        String blockName = block.getType().getKey().toString();
 
-        // [추가] 바다 바이옴 체크 (OP가 아니면 파괴 불가)
-        if (!player.isOp() && isOceanBiome(block.getLocation())) {
+        // 1. 바다 바이옴 체크 (가장 먼저 실행되어야 함)
+        if (!player.isOp() && isOceanBiome(loc)) {
             event.setCancelled(true);
             player.sendActionBar("§c바다에서는 블록을 파괴할 수 없습니다.");
             return;
         }
 
-        Material type = block.getType();
+        // 2. 나무 단계별 로직 처리
+        // 중복 호출 방지를 위해 최상단에 있던 handleTreeLogic은 지우고 여기서만 실행합니다.
+        if (isConfiguredTree(blockName)) {
+            event.setDropItems(false); // 기존 드랍템 방지
+            event.setCancelled(true);  // 블록이 즉시 사라지는 것 방지
+            plugin.blockRegenManager.handleTreeLogic(block); // 여기서 단계 변환 및 드랍 처리
+            return; // 나무 로직이 실행되었다면 여기서 끝냄 (아래 리젠 로직 실행 방지)
+        }
 
+        // 3. 기존 플랭크/문 예외 처리
         String plankKey = "planks." + plugin.blockToKey(block);
         String doorKey = "doors." + plugin.blockToKey(plugin.getBottom(block));
 
         if (plugin.dataStorage.getConfig().contains(plankKey) ||
                 plugin.dataStorage.getConfig().contains(doorKey)) {
-            return; // main 클래스에서 처리하도록 양보
+            return;
         }
 
-        // 보호 블록 체크 (파괴 방지)
+        // 4. 보호 블록 체크 (파괴 방지)
+        Material type = block.getType();
         if (!player.isOp() && protectedBlocks.contains(type)) {
             event.setCancelled(true);
             return;
         }
 
-        // 블록 리젠 체크
+        String typeName = type.name();
+
+        // 1) 광석(ORE) 또는 원석 블록(RAW_...) 파괴 시
+        if (typeName.contains("ORE")) {
+            loc.getWorld().playSound(loc, "minecraft:rust.bonus_hit", org.bukkit.SoundCategory.BLOCKS, 1.0f, 1.0f);
+        }
+        // 2) 일반 돌(STONE, COBBLESTONE, DEEPSLATE 등) 파괴 시
+        else if (type == Material.STONE || type == Material.STONE_BRICKS || type == Material.STONE_BRICK_STAIRS) {
+            loc.getWorld().playSound(loc, "minecraft:rust.ore_break", org.bukkit.SoundCategory.BLOCKS, 1.0f, 1.0f);
+        }
+
+        // 5. 일반 블록 리젠 로직
         int regenTime = plugin.blockRegenManager.getRegenTime(type);
         if (regenTime > 0) {
-            // ⭐ 핵심: 현재 위치가 덫상자 보호 구역 안인지 확인
-            if (isInsideProtectorZone(block.getLocation())) {
-                // 보호 구역 안이면 리젠을 예약하지 않음 (영구 파괴)
+            if (isInsideProtectorZone(loc)) {
                 return;
             }
-
-            scheduleRegen(block.getLocation(), type, regenTime);
+            scheduleRegen(loc, type, regenTime);
         }
+    }
+    private boolean isConfiguredTree(String blockName) {
+        ConfigurationSection treeTypes = plugin.blockRegenManager.getConfig().getConfigurationSection("tree-settings.types");
+        if (treeTypes == null) return false;
+
+        for (String key : treeTypes.getKeys(false)) {
+            if (treeTypes.getString(key + ".log").equalsIgnoreCase(blockName)) return true;
+            if (treeTypes.getStringList(key + ".stages").contains(blockName)) return true;
+        }
+        return false;
     }
 
     private boolean isInsideProtectorZone(Location loc) {
@@ -185,11 +208,15 @@ public class BlockListener implements Listener {
         Player p = e.getPlayer();
         Location newLoc = e.getBlock().getLocation();
 
-        ConfigurationSection protectors = plugin.getConfig().getConfigurationSection("protectors");
+        // [수정] plugin.getConfig() 대신 dataStorage.getConfig()를 사용하여 데이터 파일을 읽음
+        ConfigurationSection protectors = plugin.dataStorage.getConfig().getConfigurationSection("protectors");
+
         if (protectors != null) {
             for (String key : protectors.getKeys(false)) {
-                // 설치 중인 바로 그 좌표는 제외하고 거리 체크 (버그 방지)
-                if (key.equals(plugin.blockToKey(e.getBlock()))) continue;
+                // 현재 설치하려는 좌표의 키값 생성
+                String currentKey = plugin.blockToKey(e.getBlock());
+                // 이미 저장된 데이터 중 현재 좌표와 같은 것은 스킵 (재설치 등 오류 방지)
+                if (key.equals(currentKey)) continue;
 
                 String worldName = protectors.getString(key + ".world");
                 if (worldName == null || !worldName.equals(newLoc.getWorld().getName())) continue;
@@ -199,6 +226,7 @@ public class BlockListener implements Listener {
                 int z = protectors.getInt(key + ".z");
                 Location existingLoc = new Location(newLoc.getWorld(), x, y, z);
 
+                // [거리 체크] 30블록 이내에 이미 다른 도구함이 있는지 확인
                 if (existingLoc.distance(newLoc) < 30) {
                     e.setCancelled(true);
                     p.sendActionBar("§c주변 도구함과 너무 가깝습니다! (최소 30블록 거리 필요)");
@@ -207,13 +235,13 @@ public class BlockListener implements Listener {
             }
         }
 
-        // 데이터 저장
+        // --- 데이터 저장 (이후 로직은 동일) ---
         String key = "protectors." + plugin.blockToKey(e.getBlock());
         plugin.dataStorage.getConfig().set(key + ".world", newLoc.getWorld().getName());
         plugin.dataStorage.getConfig().set(key + ".x", newLoc.getBlockX());
         plugin.dataStorage.getConfig().set(key + ".y", newLoc.getBlockY());
         plugin.dataStorage.getConfig().set(key + ".z", newLoc.getBlockZ());
-        plugin.dataStorage.getConfig().set(key + ".owner", p.getUniqueId().toString()); // 주인 저장
+        plugin.dataStorage.getConfig().set(key + ".owner", p.getUniqueId().toString());
 
         List<String> authUsers = new ArrayList<>();
         authUsers.add(p.getUniqueId().toString());

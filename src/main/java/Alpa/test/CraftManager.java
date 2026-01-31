@@ -1,8 +1,6 @@
 package Alpa.test;
 
-import org.bukkit.Bukkit;
-import org.bukkit.Material;
-import org.bukkit.Sound;
+import org.bukkit.*;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -14,6 +12,9 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
+import org.bukkit.block.data.type.Furnace;
+import org.bukkit.block.BlockFace;
+import org.bukkit.util.Vector;
 
 import java.util.*;
 
@@ -39,6 +40,7 @@ public class CraftManager implements Listener {
     public CraftManager(main plugin) {
         this.plugin = plugin;
         startUpdateTask(); // 제작 진행 스케줄러 시작
+        startFurnaceParticleTask();
     }
 
     // 제작 대기열 관리 객체
@@ -49,6 +51,40 @@ public class CraftManager implements Listener {
             this.result = result;
             this.remainingTime = time;
         }
+    }
+
+    // [추가] 아이템의 한글 이름을 판별하는 메서드
+    private String getItemNameKorean(ItemStack item) {
+        if (item == null) return "공기";
+
+        // 1. 아이템 메타에 수동으로 설정된 한글 이름이 있다면 최우선 반환
+        if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
+            return item.getItemMeta().getDisplayName();
+        }
+
+        // 2. 주요 아이템 한글 매핑 (필요한 것을 더 추가하세요)
+        Material type = item.getType();
+        return switch (type) {
+            case IRON_INGOT -> "철 주괴";
+            case GOLD_INGOT -> "금 주괴";
+            case DIAMOND -> "다이아몬드";
+            case EMERALD -> "에메랄드";
+            case NETHERITE_INGOT -> "네더라이트 주괴";
+            case STICK -> "막대기";
+            case COAL -> "석탄";
+            case COPPER_INGOT -> "구리 주괴";
+            case OAK_LOG -> "참나무 원목";
+            case OAK_PLANKS -> "참나무 판자";
+            case COBBLESTONE -> "조약돌";
+            case STONE -> "돌";
+            case IRON_ORE -> "철 광석";
+            case GOLD_ORE -> "금 광석";
+            case GLASS -> "유리";
+            case BREAD -> "빵";
+            case COOKED_BEEF -> "스테이크";
+            // 매핑되지 않은 것은 대문자를 소문자로 바꾸고 언더바를 띄어쓰기로 변환 (예: LEATHER_BOOTS -> leather boots)
+            default -> type.name().toLowerCase().replace("_", " ");
+        };
     }
 
     // --- GUI 열기 메서드 ---
@@ -362,18 +398,26 @@ public class CraftManager implements Listener {
 
     // [추가] 재료 부족 메시지 전송 전용 메서드
     private void sendMissingIngredientsMessage(Player player, List<ItemStack> ingredients) {
-        StringBuilder missing = new StringBuilder("§c[System] 재료가 부족합니다. 필요 재료: ");
-        for (int i = 0; i < ingredients.size(); i++) {
-            ItemStack item = ingredients.get(i);
-            String name = item.hasItemMeta() && item.getItemMeta().hasDisplayName()
-                    ? item.getItemMeta().getDisplayName()
-                    : item.getType().name();
+        player.sendMessage("§c[System] 재료가 부족합니다. 필요 재료:");
 
-            // 아이템 개수와 함께 조립
-            missing.append("§f").append(name).append(" §7(").append(item.getAmount()).append("개)");
-            if (i < ingredients.size() - 1) missing.append("§7, ");
+        for (ItemStack item : ingredients) {
+            // 1. 커스텀 이름이 있는 경우 (가장 정확함)
+            if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
+                player.sendMessage(" §f- " + item.getItemMeta().getDisplayName() + " §7(" + item.getAmount() + "개)");
+            }
+            // 2. 일반/모드 아이템 처리
+            else {
+                // Deprecated 된 메서드 대신 아이템 타입의 기본 번역 키를 가져옵니다.
+                // 1.20.1 Forge/Spigot 환경에서는 이 키가 가장 정확한 클라이언트 번역을 유도합니다.
+                String tKey = item.getType().translationKey();
+
+                player.spigot().sendMessage(
+                        new net.md_5.bungee.api.chat.TextComponent(" §f- "),
+                        new net.md_5.bungee.api.chat.TranslatableComponent(tKey),
+                        new net.md_5.bungee.api.chat.TextComponent(" §7(" + item.getAmount() + "개)")
+                );
+            }
         }
-        player.sendMessage(missing.toString());
     }
 
     // [추가] 제작 프로세스 실행 메서드 (중복 제거용)
@@ -387,6 +431,59 @@ public class CraftManager implements Listener {
         queue.add(new CraftingTask(result.clone(), time));
         player.sendMessage("§e[System] 제작을 시작합니다.");
         player.playSound(player.getLocation(), Sound.BLOCK_ANVIL_USE, 0.5f, 1.5f);
+    }
+
+    private void startFurnaceParticleTask() {
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                // 서버의 모든 플레이어 주변을 탐색하는 방식이 성능상 유리합니다.
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    // 플레이어 주변 10칸 이내의 로드된 청크에서 화로 탐색
+                    Location loc = player.getLocation();
+                    for (int x = -10; x <= 10; x++) {
+                        for (int y = -5; y <= 5; y++) {
+                            for (int z = -10; z <= 10; z++) {
+                                org.bukkit.block.Block block = loc.clone().add(x, y, z).getBlock();
+
+                                // 일반 화로(FURNACE)만 타겟팅 (훈연기, 용광로 제외 가능)
+                                if (block.getType() == Material.FURNACE) {
+                                    if (block.getBlockData() instanceof Furnace furnace) {
+                                        // 화로가 불붙어 있는 상태(Lit)인지 확인
+                                        if (furnace.isLit()) {
+                                            spawnInnerFlame(block, furnace.getFacing());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 0L, 2L); // 2틱마다 실행 (부드러운 효과)
+    }
+
+    // 2. 화로 안쪽에 파티클을 소환하는 핵심 로직
+    private void spawnInnerFlame(org.bukkit.block.Block block, BlockFace facing) {
+        // 1. 블록의 정중앙 좌표 (0.5, 0.5, 0.5)
+        Location center = block.getLocation().add(0.5, 0.5, 0.5);
+
+        // 2. 안쪽 깊이 설정
+        // facing.getDirection()은 입구 쪽을 향하는 화살표입니다.
+        // 여기에 음수(-)를 곱하면 '입구 반대편(안쪽)'으로 이동합니다.
+        // -0.1 ~ -0.2 정도면 화로 모델의 빈 공간 중심에 딱 위치합니다.
+        double depth = -0.15;
+        Vector offset = facing.getDirection().multiply(depth);
+        // 3. 높이 조정 (화로 바닥보다 살짝 위)
+        Location particleLoc = center.add(offset);
+
+        // 4. 파티클 소환 (개수를 늘리고 범위를 좁혀 집중된 느낌 부여)
+        block.getWorld().spawnParticle(org.bukkit.Particle.FLAME, particleLoc, 3, 0.02, 0.02, 0.02, 0.01);
+
+        // 가끔 튀어오르는 불꽃 효과 (선택 사항)
+        if (new Random().nextInt(10) == 0) {
+            block.getWorld().spawnParticle(org.bukkit.Particle.LAVA, particleLoc, 1, 0, 0, 0, 0);
+        }
     }
 
     private void startUpdateTask() {
@@ -407,9 +504,11 @@ public class CraftManager implements Listener {
                     // 2. 제작 완료 처리
                     if (current.remainingTime <= 0) {
                         player.getInventory().addItem(current.result);
-                        player.sendMessage("§a[System] 제작 완료: " +
-                                (current.result.hasItemMeta() && current.result.getItemMeta().hasDisplayName()
-                                        ? current.result.getItemMeta().getDisplayName() : current.result.getType().name()));
+
+                        // ⭐ getItemNameKorean(current.result) 적용
+                        String finalName = getItemNameKorean(current.result);
+
+                        player.sendMessage("§a[System] 제작 완료: " + finalName);
                         player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.5f, 1f);
                         queue.remove(0);
                     }
@@ -531,11 +630,11 @@ public class CraftManager implements Listener {
     }
 
     private void saveRecipeSpecific(ItemStack result, List<ItemStack> ingredients, int time, String path, String slotKey) {
-        // 슬롯번호(slotKey) 하위에 랜덤한 고유 ID를 생성하여 저장
         String recipeId = UUID.randomUUID().toString().substring(0, 5);
         String basePath = "recipes." + path + "." + slotKey + "." + recipeId;
 
         plugin.getConfig().set(basePath + ".result", result);
+        // 재료의 한글 이름을 리스트 형태로 저장하거나 메타데이터를 보존함
         plugin.getConfig().set(basePath + ".ingredients", ingredients);
         plugin.getConfig().set(basePath + ".time", time);
         plugin.saveConfig();

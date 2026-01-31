@@ -30,8 +30,10 @@ public class DoorManager implements Listener {
         Block b = e.getClickedBlock();
         if (b == null) return;
 
-        String typeName = b.getType().name();
-        if (!typeName.contains("_DOOR") || typeName.contains("TRAPDOOR")) return;
+        String typeName = b.getType().name().toUpperCase();
+        boolean isModDoor = typeName.contains("BIG_DOOR") || typeName.contains("ARMORED_DOOR");
+        if (!typeName.contains("_DOOR") && !isModDoor) return;
+        if (typeName.contains("TRAPDOOR")) return;
 
         Player player = e.getPlayer();
         ItemStack item = player.getInventory().getItemInMainHand();

@@ -10,6 +10,8 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -17,6 +19,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockSpreadEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -59,45 +62,69 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     public File spawnerFile;
     public org.bukkit.configuration.file.FileConfiguration spawnerConfig;
     public ElectricManager electricManager;
+    public PlankHealthManager plankHealthManager;
+    public File gunDamageFile;
+    public org.bukkit.configuration.file.FileConfiguration gunDamageConfig;
+    public TurretManager turretManager;
+    public FileConfiguration turretConfig;
+    private File turretFile;
+    public FileConfiguration maintenanceConfig;
+    private File maintenanceFile;
+    public BlueprintManager blueprintManager;
 
     @Override
-    public void onEnable() {
-        this.groupManager = new GroupManager(this);
-        this.bedManager = new BedManager(this);
-        this.craftManager = new CraftManager(this);
-        this.tempManager = new TemperatureManager(this);
-        this.radManager = new RadiationManager(this);
-        this.respawnManager = new RespawnManager(this);
-        this.blockRegenManager = new BlockRegenManager(this);
-        this.interactBlockManager = new InteractBlockManager(this);
-        this.blockListener = new BlockListener(this);
-        this.raidManager = new RaidManager(this);
-        this.rouletteManager = new RouletteManager(this);
-        this.rouletteListener = new RouletteListener(this, this.rouletteManager);
-        this.dataStorage = new DataManager(this);
-        this.electricManager = new ElectricManager(this);
-        this.spawnerFile = new File(getDataFolder(), "custom_spawners.yml");
-        this.spawnerConfig = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(spawnerFile);
+        public void onEnable() {
+            createTurretConfig();
+            createGunDamageConfig();
+            this.groupManager = new GroupManager(this);
+            this.bedManager = new BedManager(this);
+            this.craftManager = new CraftManager(this);
+            this.tempManager = new TemperatureManager(this);
+            this.radManager = new RadiationManager(this);
+            this.respawnManager = new RespawnManager(this);
+            this.blockRegenManager = new BlockRegenManager(this);
+            this.interactBlockManager = new InteractBlockManager(this);
+            this.blockListener = new BlockListener(this);
+            this.raidManager = new RaidManager(this);
+            this.rouletteManager = new RouletteManager(this);
+            this.rouletteListener = new RouletteListener(this, this.rouletteManager);
+            this.dataStorage = new DataManager(this);
+            this.electricManager = new ElectricManager(this);
+            this.spawnerFile = new File(getDataFolder(), "custom_spawners.yml");
+            this.spawnerConfig = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(spawnerFile);
+            this.plankHealthManager = new PlankHealthManager(this);
+            this.turretManager = new TurretManager(this);
+            maintenanceFile = new File(getDataFolder(), "maintenance.yml");
+            if (!maintenanceFile.exists()) saveResource("maintenance.yml", false);
+            maintenanceConfig = YamlConfiguration.loadConfiguration(maintenanceFile);
+            OilRefineryManager refineryManager = new OilRefineryManager(this);
+            this.blueprintManager = new BlueprintManager(this);
 
-        addDefaultSettings();
-        getServer().getPluginManager().registerEvents(this.bedManager, this);
-        getServer().getPluginManager().registerEvents(new PlankHealthManager(this), this);
-        getServer().getPluginManager().registerEvents(new PlankToIronManager(this), this);
-        getServer().getPluginManager().registerEvents(new JoinManager(this), this);
-        getServer().getPluginManager().registerEvents(new EnvironmentManager(this), this);
-        getServer().getPluginManager().registerEvents(this.craftManager, this);
-        getServer().getPluginManager().registerEvents(new ReinforcedManager(this), this);
-        getServer().getPluginManager().registerEvents(new RespawnListener(this), this);
-        getServer().getPluginManager().registerEvents(new InteractBlockListener(this), this);
-        getServer().getPluginManager().registerEvents(new BlockListener(this), this);
-        getServer().getPluginManager().registerEvents(new RaidListener(this), this);
-        getServer().getPluginManager().registerEvents(new BlockDrops(this), this);
-        getServer().getPluginManager().registerEvents(new MobListener(), this);
-        getServer().getPluginManager().registerEvents(new RouletteListener(this, this.rouletteManager), this);
-        getServer().getPluginManager().registerEvents(new PlankRepairManager(this), this);
-        getServer().getPluginManager().registerEvents(new DoorManager(this), this);
-        getServer().getPluginManager().registerEvents(this, this);
-        getServer().getPluginManager().registerEvents(this.electricManager, this);
+            addDefaultSettings();
+        org.bukkit.plugin.PluginManager pm = getServer().getPluginManager();
+
+        pm.registerEvents(this.bedManager, this);
+        pm.registerEvents(this.plankHealthManager, this); // 체력 매니저 등록
+        pm.registerEvents(this.craftManager, this);
+        pm.registerEvents(this.electricManager, this);
+
+        // 3. 기타 매니저 등록 (인스턴스 생성이 필요한 것들)
+        pm.registerEvents(new PlankToIronManager(this), this);
+        pm.registerEvents(new JoinManager(this), this);
+        pm.registerEvents(new EnvironmentManager(this), this);
+        pm.registerEvents(new ReinforcedManager(this), this);
+        pm.registerEvents(new RespawnListener(this), this);
+        pm.registerEvents(new InteractBlockListener(this), this);
+        pm.registerEvents(new BlockListener(this), this);
+        pm.registerEvents(new RaidListener(this), this);
+        pm.registerEvents(new BlockDrops(this), this);
+        pm.registerEvents(new MobListener(), this);
+        pm.registerEvents(new RouletteListener(this, this.rouletteManager), this);
+        pm.registerEvents(new DoorManager(this), this);
+        pm.registerEvents(this, this);
+        pm.registerEvents(this.turretManager, this);
+        pm.registerEvents(refineryManager, this);
+        pm.registerEvents(new FurnaceListener(), this);
 
         if (!getConfig().contains("stone-settings")) {
             getConfig().set("stone-settings.repair-amount", 20); // 석재 수리량
@@ -154,6 +181,34 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             }
         }, 0L, 20L);
         restoreBlocksAfterReboot();
+    }
+
+    public void createTurretConfig() {
+        turretFile = new File(getDataFolder(), "turret.yml");
+        if (!turretFile.exists()) {
+            saveResource("turret.yml", false);
+        }
+        turretConfig = YamlConfiguration.loadConfiguration(turretFile);
+    }
+
+    private void createGunDamageConfig() {
+        gunDamageFile = new File(getDataFolder(), "gun_blockdamage.yml");
+        if (!gunDamageFile.exists()) {
+            // jar 안에 파일이 없다면 새로 생성
+            try {
+                gunDamageFile.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        gunDamageConfig = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(gunDamageFile);
+
+        if (!gunDamageConfig.contains("guns")) {
+            gunDamageConfig.set("guns.jeg_assault_rifle", 15); // 콜론(:) 대신 언더바(_) 권장 (YAML 키 오류 방지)
+            gunDamageConfig.set("guns.jeg_pistol", 5);
+            gunDamageConfig.set("guns.jeg_sniper_rifle", 50);
+            try { gunDamageConfig.save(gunDamageFile); } catch (Exception e) { e.printStackTrace(); }
+        }
     }
 
     public RaidManager getRaidManager() {
@@ -618,7 +673,9 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     }
 
     public Block getBottom(Block b) {
-        if (b.getType().name().contains("_DOOR")) {
+        String typeName = b.getType().name().toUpperCase();
+        // 바닐라 문/합금 문 (2칸 높이)
+        if (typeName.contains("_DOOR")) {
             if (b.getBlockData() instanceof org.bukkit.block.data.type.Door door) {
                 if (door.getHalf() == org.bukkit.block.data.type.Door.Half.TOP) {
                     return b.getRelative(0, -1, 0);
@@ -627,7 +684,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         }
         return b;
     }
-
     @EventHandler
     public void onDoorRedstone(org.bukkit.event.block.BlockRedstoneEvent e) {
         Block b = e.getBlock();
@@ -643,6 +699,29 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
                 }
             }
         }
+    }
+    public Block getMasterBlock(Block b) {
+        String typeName = b.getType().name().toUpperCase();
+
+        // 2칸 높이 문 (Armored Door 등)
+        if (typeName.contains("_DOOR")) {
+            if (b.getBlockData() instanceof org.bukkit.block.data.type.Door door) {
+                if (door.getHalf() == org.bukkit.block.data.type.Door.Half.TOP) {
+                    return b.getRelative(0, -1, 0);
+                }
+            }
+        }
+
+        // 4x4 대형 문 (Big Door)
+        if (typeName.contains("BIG_DOOR")) {
+            Block master = b;
+            // 같은 타입의 블록이 있는 가장 아래쪽(Y축 최하단)으로 이동
+            while (master.getRelative(0, -1, 0).getType() == b.getType()) {
+                master = master.getRelative(0, -1, 0);
+            }
+            return master;
+        }
+        return b;
     }
 
     // GUI 아이템 클릭 방지 (아이템을 꺼내가지 못하게)
@@ -742,7 +821,16 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         int y = Integer.parseInt(parts[2]);
         int z = Integer.parseInt(parts[3]);
         Block b = world.getBlockAt(x, y, z);
+        // --- [추가] 터렛 상부 모델링 제거 로직 ---
+        if (b.getType() == Material.GOLD_BLOCK) {
+            if (this.turretManager != null) {
+                // 1. 상부 모델(종이)은 그냥 지우기 (드롭 X)
+                this.turretManager.removeTurret(b.getLocation());
 
+                // 2. 내부 GUI 아이템만 바닥에 떨구기
+                this.turretManager.dropTurretItems(b.getLocation());
+            }
+        }
         if (type.equals("door")) {
             // [수정] dataStorage에서 삭제
             dataStorage.getConfig().set("doors." + key, null);
@@ -759,35 +847,17 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         }
         dataStorage.saveConfig(); // 변경사항 저장
     }
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onDummyBreak(org.bukkit.event.block.BlockBreakEvent e) {
+        Block b = e.getBlock();
+        String typeName = b.getType().name().toUpperCase();
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onHit(PlayerInteractEvent e) {
-        // 1. 왼쪽 클릭(블록 타격)이 아니면 무시
-        if (e.getAction() != Action.LEFT_CLICK_BLOCK) return;
-
-        Block b = e.getClickedBlock();
-        if (b == null) return;
-
-        Player player = e.getPlayer();
-
-        // 2. 중복 방지 쿨타임 (0.15초로 약간 늘림)
-        long now = System.currentTimeMillis();
-        if (breakCooldown.getOrDefault(player.getUniqueId(), 0L) > now) return;
-        breakCooldown.put(player.getUniqueId(), now + 150);
-
-        String plankKey = "planks." + blockToKey(b);
-        String doorKey = "doors." + blockToKey(getBottom(b));
-
-        // 설정값 가져오기 (기본 1)
-        int damage = getConfig().getInt("damage-settings.DEFAULT", 1);
-
-        // 3. 데미지 적용 및 이벤트 취소 (블록이 바로 안 깨지게)
-        if (dataStorage.getConfig().contains(plankKey)) {
-            e.setCancelled(true);
-            applyPlankDmg(b, damage, player);
-        } else if (dataStorage.getConfig().contains(doorKey)) {
-            e.setCancelled(true);
-            applyDmg(getBottom(b), damage, player);
+        if (typeName.contains("ARMORED_DOOR") || typeName.contains("BIG_DOOR")) {
+            // 크리에이티브가 아니면 절대 그냥 못 부수게 함
+            if (e.getPlayer().getGameMode() != org.bukkit.GameMode.CREATIVE) {
+                e.setCancelled(true);
+                // 여기서도 데미지를 입히고 싶다면 위 onHit의 로직을 호출하면 됩니다.
+            }
         }
     }
 
@@ -827,22 +897,20 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
                     Block b = loc.getBlock();
                     Material type = b.getType();
 
-                    // 판자류 체크
-                    String pKey = "planks." + blockToKey(b);
-                    if (dataStorage.getConfig().contains(pKey)) {
-                        applyPlankDmg(b, finalDmg, null);
-                    }
-
-                    // 2. 문 체크 (중복 방지 로직)
-                    if (type.name().contains("_DOOR")) {
-                        // 문 데이터 가져오기
+                    if (type.name().contains("_DOOR") || type.name().contains("BIG_DOOR") || type.name().contains("ARMORED_DOOR")) {
+                        // 만약 모드 블록이 마인크래프트 기본 Door 데이터를 가지고 있다면 (하단만 체크)
                         if (b.getBlockData() instanceof org.bukkit.block.data.type.Door door) {
-                            // 아래쪽(BOTTOM) 블록일 때만 데미지 계산 실행
                             if (door.getHalf() == org.bukkit.block.data.type.Door.Half.BOTTOM) {
                                 String doorKey = "doors." + blockToKey(b);
                                 if (dataStorage.getConfig().contains(doorKey)) {
                                     applyDmg(b, finalDmg, null);
                                 }
+                            }
+                        } else {
+                            // 모드 블록이 일반 블록 형태라면 바로 데미지 적용
+                            String pKey = "planks." + blockToKey(b);
+                            if (dataStorage.getConfig().contains(pKey)) {
+                                applyPlankDmg(b, finalDmg, null);
                             }
                         }
                     }
@@ -856,61 +924,112 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     }
 
     public void applyPlankDmg(Block b, int d, Player p) {
-        String key = "planks." + blockToKey(b);
-        Material type = b.getType();
-        String tName = type.name();
+        String rawKey = blockToKey(b);
+        String key = "planks." + rawKey;
 
-        // 1. 블록 등급에 따른 설정 (기존 로직 유지)
-        int maxHp = 50;
-        String prefix = "§6[Plank]";
-        Sound breakSound = Sound.BLOCK_WOOD_BREAK;
-        Sound hitSound = Sound.BLOCK_WOOD_HIT;
-
-        if (tName.contains("IRON")) {
-            maxHp = 200;
-            prefix = "§f[Iron]";
-            breakSound = Sound.BLOCK_METAL_BREAK;
-            hitSound = Sound.BLOCK_METAL_HIT;
-        } else if (tName.contains("STONE_BRICK")) {
-            maxHp = 100;
-            prefix = "§7[Stone]";
-            breakSound = Sound.BLOCK_STONE_BREAK;
-            hitSound = Sound.BLOCK_STONE_HIT;
+        // [체크] 등록된 구조물이 아니면 종료
+        if (!dataStorage.getConfig().contains(key)) {
+            return;
         }
 
-        // 2. [수정] dataStorage에서 현재 체력 가져오기
-        int currentHp = dataStorage.getConfig().getInt(key + ".health", maxHp);
+        Material type = b.getType();
+        String typeName = type.name().toUpperCase();
+
+        // 2. 실시간 재질 판별
+        String correctName;
+        int correctMax;
+
+        if (typeName.contains("ARMORED_DOOR")) {
+            correctName = "합금 문";
+            correctMax = 800; // 설정하고 싶은 체력
+        } else if (typeName.contains("BIG_DOOR")) {
+            correctName = "차고 문";
+            correctMax = 600;
+        } else if (type == Material.GOLD_BLOCK) {
+            correctName = "자동 터렛";
+            correctMax = 200;
+        } else if (typeName.contains("IRON_BLOCK")) {
+            correctName = "철제 구조물";
+            correctMax = 200;
+        } else if (typeName.contains("STONE_BRICK")) {
+            correctName = "석재 구조물";
+            correctMax = 100;
+        } else {
+            correctName = "나무 구조물";
+            correctMax = 50;
+        }
+
+        // 3. 정보 업데이트
+        String savedName = dataStorage.getConfig().getString(key + ".display_name");
+        int savedMax = dataStorage.getConfig().getInt(key + ".max_health", -1);
+
+        if (!correctName.equals(savedName) || correctMax != savedMax) {
+            dataStorage.getConfig().set(key + ".display_name", correctName);
+            dataStorage.getConfig().set(key + ".max_health", correctMax);
+            dataStorage.saveConfig();
+        }
+
+        // 4. 체력 계산
+        int currentHp = dataStorage.getConfig().getInt(key + ".health", correctMax);
         int newHp = currentHp - d;
 
+        // 사운드 설정
+        Sound breakSound = Sound.BLOCK_WOOD_BREAK;
+        Sound hitSound = Sound.BLOCK_WOOD_HIT;
+        if (type == Material.GOLD_BLOCK || typeName.contains("IRON")) {
+            breakSound = Sound.BLOCK_METAL_BREAK;
+            hitSound = Sound.BLOCK_METAL_HIT;
+        }
+
+        // --- [수정된 판정 로직] ---
         if (newHp <= 0) {
-            // [수정] dataStorage 데이터 삭제
-            dataStorage.getConfig().set(key, null);
-            dataStorage.saveConfig();
+            // 파괴되는 경우
+            if (type == Material.GOLD_BLOCK) {
+                this.turretManager.dropTurretItems(b.getLocation());
+            }
+            // 3. [핵심] 블록 제거 로직 분기
+            if (typeName.contains("BIG_DOOR")) {
+                // 4x4 대형 문 전체 제거
+                removeBigObject(b);
+            } else {
+                // 일반 블록 제거
+                b.setType(Material.AIR);
 
-            b.setType(Material.AIR);
+                // 2칸 높이 모드 문(Armored 등)일 경우 상단도 체크해서 제거
+                Block top = b.getRelative(0, 1, 0);
+                if (top.getType().name().contains("DOOR") || top.getType() == type) {
+                    top.setType(Material.AIR);
+                }
+            }
+
             b.getWorld().playSound(b.getLocation(), breakSound, 1.0f, 1.0f);
-            if (p != null) {
-                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText("§c[System] 구조물이 파괴되었습니다!"));
-            }
+
+            if (p != null) p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                    TextComponent.fromLegacyText("§c[System] " + correctName + "이(가) 파괴되었습니다!"));
         } else {
-            // [수정] dataStorage 체력 감소 저장
-            dataStorage.getConfig().set(key + ".health", newHp);
+            // [중요!] 체력이 남아있는 경우: 블록을 없애면 안 됩니다!
+            dataStorage.getConfig().set(key + ".health", newHp); // 줄어든 체력만 저장
             dataStorage.saveConfig();
 
             if (p != null) {
-                String progressBar = getProgressBar(newHp, maxHp);
+                String progressBar = getProgressBar(newHp, correctMax);
                 p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText(prefix + " 남은 체력 " + progressBar + " §f(" + newHp + " / " + maxHp + ")"));
+                        TextComponent.fromLegacyText("§f[" + correctName + "] " + progressBar + " §f(" + newHp + " / " + correctMax + ")"));
             }
+            // 타격 사운드만 재생 (블록은 그대로 유지)
             b.getWorld().playSound(b.getLocation(), hitSound, 1.0f, 0.8f);
         }
     }
-
     public void applyDmg(Block b, int d, Player p) {
         String key = "doors." + blockToKey(b);
-        int maxHp = b.getType().name().contains("IRON") ? 200 : 100;
+        String typeName = b.getType().name().toUpperCase();
 
+        // 1. 최대 체력 결정 (기준점)
+        int maxHp;
+        if (typeName.contains("ARMORED_DOOR")) maxHp = 800;
+        else if (typeName.contains("BIG_DOOR")) maxHp = 600;
+        else if (typeName.contains("IRON")) maxHp = 200;
+        else maxHp = 100;
         // [수정] dataStorage에서 현재 체력 가져오기
         int currentHp = dataStorage.getConfig().getInt(key + ".health", maxHp);
         int newHp = currentHp - d;
@@ -921,7 +1040,10 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             dataStorage.saveConfig();
 
             b.setType(Material.AIR);
-            b.getRelative(0, 1, 0).setType(Material.AIR);
+            Block top = b.getRelative(0, 1, 0);
+            if (top.getType() == b.getType() || top.getType().name().contains("_DOOR")) {
+                top.setType(Material.AIR);
+            }
 
             if (p != null) {
                 p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
@@ -938,11 +1060,57 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
                 p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
                         TextComponent.fromLegacyText("§6[Door] 체력: " + progressBar + " §f(" + newHp + " / " + maxHp + ")"));
             }
-            b.getWorld().playSound(b.getLocation(), Sound.BLOCK_METAL_HIT, 1.0f, 1.2f);
+            Sound hitSound = typeName.contains("IRON") || typeName.contains("DOOR") ? Sound.BLOCK_METAL_HIT : Sound.BLOCK_WOOD_HIT;
+            b.getWorld().playSound(b.getLocation(), hitSound, 1.0f, 1.2f);
             b.getWorld().spawnParticle(Particle.CRIT, b.getLocation().add(0.5, 0.5, 0.5), 5);
         }
     }
+    public void removeBigObject(Block master) {
+        Material type = master.getType();
+        // 기준점(master)으로부터 위쪽/옆쪽으로 4x4 범위를 탐색하여 동일 재질 제거
+        // (설치 방향에 따라 좌표 조정이 필요할 수 있으나, 보통은 4x4x4 범위를 훑는게 안전함)
+        for (int x = 0; x < 4; x++) {
+            for (int y = 0; y < 4; y++) {
+                for (int z = 0; z < 4; z++) {
+                    Block rel = master.getRelative(x, y, z);
+                    if (rel.getType() == type) {
+                        rel.setType(Material.AIR);
+                    }
+                    // 반대 방향(-x, -z)도 체크가 필요하다면 범위를 -2 ~ 2로 잡으셔도 됩니다.
+                }
+            }
+        }
+    }
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onDummyBlockBreak(BlockBreakEvent e) {
+        Block b = e.getBlock();
+        Player p = e.getPlayer();
 
+        Block master = getMasterBlock(b); // 기준점 찾기 (4x4, 2칸 높이 대응)
+        String masterKey = blockToKey(master);
+        String typeName = b.getType().name().toUpperCase();
+
+        String plankPath = "planks." + masterKey;
+        String doorPath = "doors." + masterKey;
+        boolean isModBlock = typeName.contains("ARMORED_DOOR") || typeName.contains("BIG_DOOR");
+
+        // 데이터가 있거나 모드 블록인 경우
+        if (dataStorage.getConfig().contains(plankPath) || dataStorage.getConfig().contains(doorPath) || isModBlock) {
+            // 1. [중요] 실제 블록 파괴를 취소 (사라지지 않게 함)
+            e.setCancelled(true);
+
+            // 2. 데미지 적용 (한 번 부술 때마다 데미지 1 차감)
+            // 만약 도구에 따라 더 많이 깎고 싶다면 여기서 도구 체크를 합니다.
+            int damage = 1;
+            if (dataStorage.getConfig().contains(doorPath)) {
+                applyDmg(master, damage, p);
+            } else {
+                applyPlankDmg(master, damage, p);
+            }
+            // 블록이 파괴되는 시각적 효과를 주기 위해 패킷을 보내거나 소리를 재생할 수 있습니다.
+            master.getWorld().playSound(master.getLocation(), Sound.BLOCK_METAL_HIT, 1.0f, 1.0f);
+        }
+    }
     // 체력을 시각적인 바로 변환해주는 메서드
 
     public String getProgressBar(int current, int max) {
