@@ -191,43 +191,60 @@ public class BlockListener implements Listener {
         }
         return false;
     }
-
-    // 1. 설치 로직 (중복 제거 및 거리 제한 유지)
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBlockPlace(BlockPlaceEvent event) {
-        Player player = event.getPlayer();
-        Block block = event.getBlockPlaced();
+    public void onPlace(BlockPlaceEvent event) {
+        Block block = event.getBlock();
+        Material originalType = block.getType();
 
-        // 1. 바다 바이옴 체크
-        if (!player.isOp() && isOceanBiome(block.getLocation())) {
-            event.setCancelled(true);
-            player.sendActionBar("§c바다에서는 블록을 설치할 수 없습니다.");
-            return;
-        }
+        if (originalType.name().contains("TOOL_CUPBOARD")) {
+            event.setCancelled(true); // 1. 이벤트 취소
 
-        // [수정 포인트] Material의 이름을 문자열로 가져와서 비교합니다.
-        Material type = block.getType();
-        String typeName = type.name(); // 예: "EXAMPLEMOD_TOOL_CUPBOARD"
+            Location bottomLoc = block.getLocation();
+            Location topLoc = bottomLoc.clone().add(0, 1, 0);
 
-        if (typeName.contains("TOOL_CUPBOARD") || type == Material.TRAPPED_CHEST) {
-            handleProtectorPlace(event, event.getBlock().getLocation());
-            return;
-        }
+            // [수정된 체크 로직]
+            Block topBlock = topLoc.getBlock();
+            Material topMat = topBlock.getType();
 
-        // 2. 일반 블록: 보호 구역 체크
-        if (isProtectedLocation(player, block.getLocation())) {
-            event.setCancelled(true);
-            player.sendActionBar("§c이 지역은 건설차단 구역입니다.");
-            return;
-        }
+            // 윗칸이 공기가 아니고, 풀/눈/물처럼 겹쳐 설치 가능한 블록도 아니라면 설치 중단
+            if (topMat != Material.AIR && !isReplaceableMaterial(topMat)) {
+                event.getPlayer().sendMessage("§c설치할 공간이 부족합니다. (위쪽이 막혀있음)");
+                return;
+            }
 
-        // 3. OP 제한 블록 체크
-        if (player.isOp()) return;
-        if (protectedBlocks.contains(type) || placeRestrictedBlocks.contains(type)) {
-            event.setCancelled(true);
+            // 2. 아래칸: 덫상자 설치 (물리 업데이트 false)
+            bottomLoc.getBlock().setType(Material.TRAPPED_CHEST, false);
+            if (bottomLoc.getBlock().getState() instanceof org.bukkit.block.Chest chest) {
+                chest.setCustomName("도구함");
+                chest.update(true, false);
+            }
+
+            // 3. 윗칸: 모드 블록 설치
+            topBlock.setType(originalType, false);
+            org.bukkit.block.data.BlockData data = topBlock.getBlockData();
+            if (data instanceof org.bukkit.block.data.Bisected bisected) {
+                bisected.setHalf(org.bukkit.block.data.Bisected.Half.TOP);
+                topBlock.setBlockData(bisected, false);
+            }
+
+            handleProtectorPlace(event, bottomLoc);
+
+            if (event.getPlayer().getGameMode() != org.bukkit.GameMode.CREATIVE) {
+                event.getItemInHand().setAmount(event.getItemInHand().getAmount() - 1);
+            }
         }
     }
 
+    // [추가] Material의 대체 가능 여부를 판단하는 커스텀 메서드
+    private boolean isReplaceableMaterial(Material material) {
+        // 최신 서버라면 material.isReplaceable() 대신 아래와 같이 체크합니다.
+        return material == Material.AIR ||
+                material == Material.CAVE_AIR ||
+                material == Material.VOID_AIR ||
+                material == Material.VINE ||
+                material == Material.WATER ||
+                material == Material.LAVA;
+    }
     // 2. 덫상자 전용 처리 메서드 (수정됨)
     private void handleProtectorPlace(BlockPlaceEvent e, Location loc) {
         Player p = e.getPlayer();
@@ -373,14 +390,6 @@ public class BlockListener implements Listener {
         if (isProtectedLocation(p, loc)) {
             e.setCancelled(true);
             p.sendActionBar("§c자신의 건설차단 구역에서만 가능합니다.");
-        }
-    }
-    @EventHandler
-    public void onPlace(BlockPlaceEvent e) {
-        Block b = e.getBlock();
-        if (b.getType().name().contains("TOOL_CUPBOARD")) {
-            Location saveLoc = b.getLocation();
-            handleProtectorPlace(e, saveLoc);
         }
     }
 }

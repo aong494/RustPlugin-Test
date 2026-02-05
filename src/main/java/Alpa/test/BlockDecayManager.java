@@ -12,7 +12,9 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
+import java.lang.reflect.Field;
 
+import java.lang.reflect.Method;
 import java.util.*;
 
 public class BlockDecayManager extends BukkitRunnable {
@@ -83,36 +85,16 @@ public class BlockDecayManager extends BukkitRunnable {
 
         plugin.dataStorage.saveConfig();
     }
-
-    // --- 핵심 보정 메서드 ---
-
     private Inventory getInventoryAt(Location loc) {
         Block block = loc.getBlock();
 
-        // 1. 본체(LOWER)와 위 칸(UPPER) 모두 시도
-        Block[] targets = {block, block.getRelative(0, -1, 0)};
-
-        for (Block b : targets) {
-            // [수정] Material 이름 확인 (examplemod:tool_cupboard 형태 대비)
-            if (b.getType().name().contains("TOOL_CUPBOARD")) {
-                org.bukkit.block.BlockState state = b.getState();
-
-                // 2. 가장 표준적인 방법
-                if (state instanceof InventoryHolder holder) {
-                    return holder.getInventory();
-                }
-                // 3. 만약 위 방법이 실패한다면 (모드 블록 호환성 문제)
-                // 인벤토리를 가진 블록은 보통 Container 인터페이스를 가집니다.
-                try {
-                    if (state instanceof org.bukkit.block.Container container) {
-                        return container.getInventory();
-                    }
-                } catch (NoClassDefFoundError ignored) {}
+        if (block.getType() == Material.TRAPPED_CHEST) {
+            if (block.getState() instanceof org.bukkit.block.Chest chest) {
+                return chest.getInventory(); // 100% 성공 보장
             }
         }
         return null;
     }
-
     private void updateStatusAtLocation(Location loc, Set<String> missing) {
         org.bukkit.block.BlockState state = loc.getBlock().getState();
         // Container 인터페이스가 이름을 바꿀 수 있는 상위 객체입니다.
