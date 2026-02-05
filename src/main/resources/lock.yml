@@ -1,0 +1,31 @@
+# 자물쇠 설치 세부 설정
+# depth: 문 면으로부터의 거리 (0.05 ~ 0.2 추천)
+# yaw: 회전 보정 (0, 90, 180, 270 등)
+# thickness: 앞뒷면 자물쇠 사이의 간격
+
+IRON_DOOR:
+  # 개별 설정이 없으면 이 기본값을 사용합니다.
+  depth: 0.1
+  # 특정 방향만 튀어나오거나 들어갔다면 아래 설정을 추가하세요.
+  depth-north: 0.1
+  depth-south: 0.12
+  depth-east: 0.08
+  depth-west: 0.08
+
+  thickness: 0.1          # 북/남 앞뒤 간격
+  thickness-eastwest: 0.1 # 동/서 앞뒤 간격
+  yaw: 0.0
+
+ARMORED_DOOR:
+  NORTH:
+    depth: 0.05
+    yaw: 0.0
+  SOUTH:
+    depth: 0.05
+    yaw: 0.0
+  EAST:
+    depth: 0.12
+    yaw: 270.0
+  WEST:
+    depth: 0.12
+    yaw: 90.0

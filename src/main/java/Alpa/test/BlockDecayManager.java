@@ -1,12 +1,15 @@
 package Alpa.test;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
-import org.bukkit.block.Chest;
+import org.bukkit.block.Container; // 심볼 해결을 위해 반드시 필요
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
 
@@ -23,163 +26,153 @@ public class BlockDecayManager extends BukkitRunnable {
     @Override
     public void run() {
         ConfigurationSection dataConfig = plugin.dataStorage.getConfig();
-        FileConfiguration mConfig = plugin.maintenanceConfig; // maintenance.yml
+        FileConfiguration mConfig = plugin.maintenanceConfig;
 
-        // 상자별로 어떤 블록이 몇 개 있는지 저장
-        Map<Chest, Map<Material, Integer>> chestBlockCounts = new HashMap<>();
-        // 유지보수를 받지 못하는 블록 키 저장
+        Map<Location, Map<Material, Integer>> locationBlockCounts = new HashMap<>();
         Set<String> unmaintainedPlanks = new HashSet<>();
         Set<String> unmaintainedDoors = new HashSet<>();
 
-        // 1. 모든 블록 스캔 및 관리 상자 매칭
-        scanSection("planks", dataConfig, chestBlockCounts, unmaintainedPlanks);
-        scanSection("doors", dataConfig, chestBlockCounts, unmaintainedDoors);
+        // 1. 블록 스캔 (AIR 및 모드 블록 대응)
+        scanSection("planks", dataConfig, locationBlockCounts, unmaintainedPlanks);
+        scanSection("doors", dataConfig, locationBlockCounts, unmaintainedDoors);
 
-        Map<Chest, Set<String>> chestMissingItems = new HashMap<>();
-        Set<Chest> processedChests = new HashSet<>(chestBlockCounts.keySet());
+        Map<Location, Set<String>> locationMissingItems = new HashMap<>();
 
-        // 2. 상자별 비용 계산 및 차감
-        for (Chest chest : processedChests) {
-            Map<Material, Integer> counts = chestBlockCounts.get(chest);
+        // 2. 도구함별 자원 차감
+        for (Map.Entry<Location, Map<Material, Integer>> entry : locationBlockCounts.entrySet()) {
+            Location cupLoc = entry.getKey();
+            Map<Material, Integer> counts = entry.getValue();
 
-            for (Material blockType : counts.keySet()) {
-                int count = counts.get(blockType);
-                String typeName = getSettingKey(blockType); // 설정 키 추출 로직 분리
+            Inventory inv = getInventoryAt(cupLoc);
+            System.out.println("[디버그] 위치: " + cupLoc.getBlockX() + ", " + cupLoc.getBlockY() + ", " + cupLoc.getBlockZ());
+            System.out.println("[디버그] 도구함 인벤토리 감지 결과: " + (inv == null ? "실패" : "성공 (" + inv.getSize() + "칸)"));
 
-                String path = "costs." + typeName;
-                if (!mConfig.contains(path)) {
-                    // 설정이 없으면 체력 깎음
-                    markAsUnmaintainedInChest(chest, blockType, unmaintainedPlanks, unmaintainedDoors, dataConfig);
-                    continue;
+            if (inv != null) {
+                boolean allMaintained = true;
+                for (Map.Entry<Material, Integer> countEntry : counts.entrySet()) {
+                    Material blockType = countEntry.getKey();
+                    int count = countEntry.getValue();
+
+                    String typeName = getSettingKey(blockType);
+                    String path = "costs." + typeName;
+
+                    if (!mConfig.contains(path)) continue;
+
+                    Material costItem = Material.valueOf(mConfig.getString(path + ".item"));
+                    int perAmount = mConfig.getInt(path + ".amount", 10);
+                    int costQty = mConfig.getInt(path + ".cost", 1);
+                    int totalRequired = (int) Math.ceil((double) count / perAmount) * costQty;
+
+                    if (inv.contains(costItem, totalRequired)) {
+                        removeItemFromInventory(inv, costItem, totalRequired);
+                    } else {
+                        allMaintained = false;
+                        locationMissingItems.computeIfAbsent(cupLoc, k -> new HashSet<>()).add(getItemKoreanName(costItem));
+                        markAsUnmaintainedAtLocation(cupLoc, unmaintainedPlanks, unmaintainedDoors, dataConfig);
+                    }
                 }
-
-                Material costItem = Material.valueOf(mConfig.getString(path + ".item"));
-                int perAmount = mConfig.getInt(path + ".amount", 10);
-                int costQty = mConfig.getInt(path + ".cost", 1);
-                int totalRequired = (int) Math.ceil((double) count / perAmount) * costQty;
-
-                if (chest.getInventory().contains(costItem, totalRequired)) {
-                    removeItemFromChest(chest, costItem, totalRequired);
-                } else {
-                    // [핵심] 재료가 부족하면 해당 상자 범위 내의 블록들 체력을 깎도록 등록
-                    chestMissingItems.computeIfAbsent(chest, k -> new HashSet<>()).add(getItemKoreanName(costItem));
-                    markAsUnmaintainedInChest(chest, blockType, unmaintainedPlanks, unmaintainedDoors, dataConfig);
-                }
+                updateStatusAtLocation(cupLoc, locationMissingItems.get(cupLoc));
+            } else {
+                markAsUnmaintainedAtLocation(cupLoc, unmaintainedPlanks, unmaintainedDoors, dataConfig);
             }
         }
 
-        // 3. 상자 이름 업데이트 (상태 표시)
-        for (Chest chest : processedChests) {
-            updateStatusName(chest, chestMissingItems.get(chest));
-        }
-
-        // 4. 유지보수 실패한 블록들 체력 감소
+        // 3. 체력 감소 적용
         applyDecay(unmaintainedPlanks, "planks");
         applyDecay(unmaintainedDoors, "doors");
 
         plugin.dataStorage.saveConfig();
     }
 
-    private String getSettingKey(Material mat) {
-        String name = mat.name();
-        if (name.equals("GOLD_BLOCK")) return "GOLD_BLOCK";
-        if (name.equals("IRON_BLOCK")) return "IRON_BLOCK";
-        if (name.contains("STONE_BRICK")) return "STONE_BRICKS";
-        if (name.contains("_PLANKS") || name.contains("_STAIRS")) return "WOODEN_PLANK";
-        return name;
+    // --- 핵심 보정 메서드 ---
+
+    private Inventory getInventoryAt(Location loc) {
+        Block block = loc.getBlock();
+
+        // 1. 본체(LOWER)와 위 칸(UPPER) 모두 시도
+        Block[] targets = {block, block.getRelative(0, -1, 0)};
+
+        for (Block b : targets) {
+            // [수정] Material 이름 확인 (examplemod:tool_cupboard 형태 대비)
+            if (b.getType().name().contains("TOOL_CUPBOARD")) {
+                org.bukkit.block.BlockState state = b.getState();
+
+                // 2. 가장 표준적인 방법
+                if (state instanceof InventoryHolder holder) {
+                    return holder.getInventory();
+                }
+                // 3. 만약 위 방법이 실패한다면 (모드 블록 호환성 문제)
+                // 인벤토리를 가진 블록은 보통 Container 인터페이스를 가집니다.
+                try {
+                    if (state instanceof org.bukkit.block.Container container) {
+                        return container.getInventory();
+                    }
+                } catch (NoClassDefFoundError ignored) {}
+            }
+        }
+        return null;
     }
 
-    private void scanSection(String section, ConfigurationSection config, Map<Chest, Map<Material, Integer>> counts, Set<String> unmaintained) {
+    private void updateStatusAtLocation(Location loc, Set<String> missing) {
+        org.bukkit.block.BlockState state = loc.getBlock().getState();
+        // Container 인터페이스가 이름을 바꿀 수 있는 상위 객체입니다.
+        if (!(state instanceof Container)) {
+            state = loc.getBlock().getRelative(0, 1, 0).getState();
+        }
+
+        if (state instanceof Container container) {
+            String status = (missing == null || missing.isEmpty()) ? "§a[보호 중]" : "§c[재료 부족]";
+            container.setCustomName(status + " 도구함");
+            state.update(true);
+        }
+    }
+
+    private Location findMaintenanceLocation(Block b) {
+        int radius = plugin.maintenanceConfig.getInt("settings.radius", 15);
+        Location blockLoc = b.getLocation();
+        ConfigurationSection protectors = plugin.dataStorage.getConfig().getConfigurationSection("protectors");
+        if (protectors == null) return null;
+
+        for (String key : protectors.getKeys(false)) {
+            String worldName = protectors.getString(key + ".world");
+            if (worldName == null || !worldName.equals(blockLoc.getWorld().getName())) continue;
+
+            Location cupLoc = new Location(blockLoc.getWorld(),
+                    protectors.getInt(key + ".x"),
+                    protectors.getInt(key + ".y"),
+                    protectors.getInt(key + ".z"));
+
+            if (cupLoc.distance(blockLoc) <= radius) return cupLoc;
+        }
+        return null;
+    }
+
+    // --- 나머지 지원 메서드 ---
+
+    private void scanSection(String section, ConfigurationSection config, Map<Location, Map<Material, Integer>> counts, Set<String> unmaintained) {
         ConfigurationSection s = config.getConfigurationSection(section);
         if (s == null) return;
 
         for (String key : s.getKeys(false)) {
             Block b = getBlockFromKey(key);
-            if (b == null || b.getType() == Material.AIR) {
-                config.set(section + "." + key, null);
-                continue;
-            }
+            if (b == null) continue;
 
-            Chest chest = findMaintenanceChest(b);
-            if (chest != null) {
-                counts.computeIfAbsent(chest, k -> new HashMap<>());
-                Map<Material, Integer> typeMap = counts.get(chest);
-                typeMap.put(b.getType(), typeMap.getOrDefault(b.getType(), 0) + 1);
+            Location cupLoc = findMaintenanceLocation(b);
+            if (cupLoc != null) {
+                counts.computeIfAbsent(cupLoc, k -> new HashMap<>());
+                Material logicType = b.getType();
+                if (logicType == Material.AIR) {
+                    logicType = section.equals("planks") ? Material.OAK_PLANKS : Material.IRON_DOOR;
+                }
+                counts.get(cupLoc).put(logicType, counts.get(cupLoc).getOrDefault(logicType, 0) + 1);
             } else {
                 unmaintained.add(key);
             }
         }
     }
 
-    private void markAsUnmaintainedInChest(Chest chest, Material type, Set<String> planks, Set<String> doors, ConfigurationSection dataConfig) {
-        int radius = plugin.maintenanceConfig.getInt("settings.radius", 10);
-        org.bukkit.Location loc = chest.getLocation();
-
-        // 상자 주변의 데이터를 뒤져서 해당 타입의 블록 키를 찾아냄
-        // 1. 판자 섹션 뒤지기
-        ConfigurationSection pSec = dataConfig.getConfigurationSection("planks");
-        if (pSec != null) {
-            for (String key : pSec.getKeys(false)) {
-                if (isBlockInRadius(key, loc, radius)) {
-                    Block b = getBlockFromKey(key);
-                    if (b != null && b.getType() == type) {
-                        planks.add(key); // 체력 감소 대상에 추가
-                    }
-                }
-            }
-        }
-        // 2. 문 섹션 뒤지기
-        ConfigurationSection dSec = dataConfig.getConfigurationSection("doors");
-        if (dSec != null) {
-            for (String key : dSec.getKeys(false)) {
-                if (isBlockInRadius(key, loc, radius)) {
-                    Block b = getBlockFromKey(key);
-                    if (b != null && b.getType() == type) {
-                        doors.add(key); // 체력 감소 대상에 추가
-                    }
-                }
-            }
-        }
-    }
-
-    private boolean isBlockInRadius(String key, org.bukkit.Location center, int radius) {
-        String[] p = key.split("_");
-        if (!p[0].equals(center.getWorld().getName())) return false;
-        int x = Integer.parseInt(p[1]);
-        int y = Integer.parseInt(p[2]);
-        int z = Integer.parseInt(p[3]);
-        return Math.abs(x - center.getBlockX()) <= radius &&
-                Math.abs(y - center.getBlockY()) <= radius &&
-                Math.abs(z - center.getBlockZ()) <= radius;
-    }
-
-    private void applyDecay(Set<String> keys, String section) {
-        int decayAmt = plugin.maintenanceConfig.getInt("settings.decay-amount", 1);
-        for (String key : keys) {
-            String path = section + "." + key + ".health";
-            int hp = plugin.dataStorage.getConfig().getInt(path, 50);
-            int newHp = hp - decayAmt;
-
-            if (newHp <= 0) {
-                plugin.destroyBlockByKey(key, section.substring(0, section.length() - 1));
-            } else {
-                plugin.dataStorage.getConfig().set(path, newHp);
-            }
-        }
-    }
-
-    private void updateStatusName(Chest chest, Set<String> missing) {
-        if (missing == null || missing.isEmpty()) {
-            updateChestName(chest, "§a[유지 중] 보관함");
-        } else {
-            updateChestName(chest, "§c[재료 부족] " + String.join(", ", missing) + " 필요!");
-        }
-    }
-
-    // --- 유틸리티 메서드 ---
-
-    private void removeItemFromChest(Chest chest, Material material, int amount) {
-        ItemStack[] contents = chest.getInventory().getContents();
+    private void removeItemFromInventory(Inventory inv, Material material, int amount) {
+        ItemStack[] contents = inv.getContents();
         int remaining = amount;
         for (ItemStack is : contents) {
             if (is != null && is.getType() == material) {
@@ -193,37 +186,63 @@ public class BlockDecayManager extends BukkitRunnable {
             }
             if (remaining <= 0) break;
         }
-        chest.getInventory().setContents(contents);
+        inv.setContents(contents);
     }
 
-    private void updateChestName(Chest chest, String name) {
-        if (name.equals(chest.getCustomName())) return;
-        chest.setCustomName(name);
-        chest.update(true);
+    private void markAsUnmaintainedAtLocation(Location loc, Set<String> planks, Set<String> doors, ConfigurationSection dataConfig) {
+        int radius = plugin.maintenanceConfig.getInt("settings.radius", 15);
+        addBlocksInRadius(dataConfig.getConfigurationSection("planks"), loc, radius, planks);
+        addBlocksInRadius(dataConfig.getConfigurationSection("doors"), loc, radius, doors);
     }
 
-    private Chest findMaintenanceChest(Block b) {
-        int radius = plugin.maintenanceConfig.getInt("settings.radius", 10);
-        for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= radius; y++) {
-                for (int z = -radius; z <= radius; z++) {
-                    Block rel = b.getRelative(x, y, z);
-                    if (rel.getType() == Material.TRAPPED_CHEST) {
-                        return (Chest) rel.getState();
-                    }
-                }
+    private void addBlocksInRadius(ConfigurationSection section, Location loc, int radius, Set<String> targetSet) {
+        if (section == null) return;
+        for (String key : section.getKeys(false)) {
+            if (isBlockInRadius(key, loc, radius)) targetSet.add(key);
+        }
+    }
+
+    private boolean isBlockInRadius(String key, Location center, int radius) {
+        String[] p = key.split("_");
+        if (!p[0].equals(center.getWorld().getName())) return false;
+        try {
+            int x = Integer.parseInt(p[1]), y = Integer.parseInt(p[2]), z = Integer.parseInt(p[3]);
+            return Math.abs(x - center.getBlockX()) <= radius &&
+                    Math.abs(z - center.getBlockZ()) <= radius;
+        } catch (Exception e) { return false; }
+    }
+
+    private void applyDecay(Set<String> keys, String section) {
+        int decayAmt = plugin.maintenanceConfig.getInt("settings.decay-amount", 1);
+        for (String key : keys) {
+            String path = section + "." + key + ".health";
+            int hp = plugin.dataStorage.getConfig().getInt(path, 50);
+            int newHp = Math.max(0, hp - decayAmt);
+            plugin.dataStorage.getConfig().set(path, newHp);
+
+            if (newHp <= 0) {
+                Block b = getBlockFromKey(key);
+                if (b != null && section.equals("doors")) plugin.removeLockEntity(b);
+                plugin.destroyBlockByKey(key, section.substring(0, section.length() - 1));
             }
         }
-        return null;
+    }
+
+    private String getSettingKey(Material mat) {
+        String name = mat.name();
+        if (name.equals("AIR") || name.contains("_PLANKS") || name.contains("TOOL_CUPBOARD")) return "WOODEN_PLANK";
+        if (name.contains("STONE_BRICK")) return "STONE_BRICKS";
+        return name;
     }
 
     private Block getBlockFromKey(String key) {
-        String[] parts = key.split("_");
-        if (parts.length < 4) return null;
-        World w = Bukkit.getWorld(parts[0]);
-        if (w == null) return null;
-        return w.getBlockAt(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
+        try {
+            String[] parts = key.split("_");
+            World world = Bukkit.getWorld(parts[0]);
+            return (world != null) ? world.getBlockAt(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3])) : null;
+        } catch (Exception e) { return null; }
     }
+
     private String getItemKoreanName(Material mat) {
         switch (mat) {
             case IRON_INGOT: return "철괴";

@@ -6,6 +6,7 @@ import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.*;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -71,11 +72,17 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     public FileConfiguration maintenanceConfig;
     private File maintenanceFile;
     public BlueprintManager blueprintManager;
+    public ReinforcedManager reinforcedManager;
+    private File lockFile;
+    private FileConfiguration lockConfig;
+    public HologramManager hologramManager;
+    public DoorManager doorManager;
 
     @Override
         public void onEnable() {
             createTurretConfig();
             createGunDamageConfig();
+            createLockConfig();
             this.groupManager = new GroupManager(this);
             this.bedManager = new BedManager(this);
             this.craftManager = new CraftManager(this);
@@ -99,6 +106,9 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             maintenanceConfig = YamlConfiguration.loadConfiguration(maintenanceFile);
             OilRefineryManager refineryManager = new OilRefineryManager(this);
             this.blueprintManager = new BlueprintManager(this);
+            this.reinforcedManager = new ReinforcedManager(this);
+            this.hologramManager = new HologramManager(this);
+            this.doorManager = new DoorManager(this);
 
             addDefaultSettings();
         org.bukkit.plugin.PluginManager pm = getServer().getPluginManager();
@@ -125,6 +135,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         pm.registerEvents(this.turretManager, this);
         pm.registerEvents(refineryManager, this);
         pm.registerEvents(new FurnaceListener(), this);
+        pm.registerEvents(new BlueprintManager(this), this);
 
         if (!getConfig().contains("stone-settings")) {
             getConfig().set("stone-settings.repair-amount", 20); // 석재 수리량
@@ -217,10 +228,16 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
 
     @Override
     public void onDisable() {
+        if (this.hologramManager != null) {
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                this.hologramManager.removePreview(p);
+            }
+        }
         if (blockRegenManager != null) {
             blockRegenManager.savePending();
         }
-
+        for (Player player : Bukkit.getOnlinePlayers()) {
+        }
         // 모든 인스턴스의 홀로그램과 태스크를 정리
         if (this.raidManager != null) {
             this.raidManager.cleanup();
@@ -701,27 +718,43 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         }
     }
     public Block getMasterBlock(Block b) {
+        if (b == null) return null;
         String typeName = b.getType().name().toUpperCase();
 
-        // 2칸 높이 문 (Armored Door 등)
-        if (typeName.contains("_DOOR")) {
-            if (b.getBlockData() instanceof org.bukkit.block.data.type.Door door) {
-                if (door.getHalf() == org.bukkit.block.data.type.Door.Half.TOP) {
-                    return b.getRelative(0, -1, 0);
+        if (typeName.contains("BIG_DOOR") || typeName.contains("DOOR_DUMMY")) {
+            return findBigDoorMaster(b);
+        }
+
+        // 문자열 기반의 Half 판정 (아머드 도어 호환성 최상)
+        String dataStr = b.getBlockData().getAsString().toLowerCase();
+        if (dataStr.contains("half=upper") || dataStr.contains("half=top")) {
+            return b.getRelative(BlockFace.DOWN);
+        }
+
+        return b;
+    }
+    private Block findBigDoorMaster(Block b) {
+        // 1. 이미 마스터 블록인 경우 바로 반환
+        if (b.getType().name().contains("BIG_DOOR") && !b.getType().name().contains("DUMMY")) {
+            return b;
+        }
+
+        // 2. 더미 블록인 경우: 주변 4x4x4 범위를 뒤져서 마스터 블록을 찾음
+        // (모드 로직상 마스터는 항상 왼쪽 하단 기준이므로 현재 위치 기준 -4 ~ 0 범위를 탐색)
+        for (int y = -4; y <= 0; y++) {
+            for (int x = -4; x <= 4; x++) {
+                for (int z = -4; z <= 4; z++) {
+                    Block target = b.getRelative(x, y, z);
+                    String targetName = target.getType().name().toUpperCase();
+
+                    // 진짜 마스터 블록(DUMMY가 아닌 BIG_DOOR)을 찾으면 반환
+                    if (targetName.contains("BIG_DOOR") && !targetName.contains("DUMMY")) {
+                        return target;
+                    }
                 }
             }
         }
-
-        // 4x4 대형 문 (Big Door)
-        if (typeName.contains("BIG_DOOR")) {
-            Block master = b;
-            // 같은 타입의 블록이 있는 가장 아래쪽(Y축 최하단)으로 이동
-            while (master.getRelative(0, -1, 0).getType() == b.getType()) {
-                master = master.getRelative(0, -1, 0);
-            }
-            return master;
-        }
-        return b;
+        return b; // 못 찾으면 자기 자신 반환
     }
 
     // GUI 아이템 클릭 방지 (아이템을 꺼내가지 못하게)
@@ -832,6 +865,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             }
         }
         if (type.equals("door")) {
+            removeLockEntity(b);
             // [수정] dataStorage에서 삭제
             dataStorage.getConfig().set("doors." + key, null);
             b.setType(Material.AIR);
@@ -861,68 +895,65 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         }
     }
 
+
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onExplode(EntityExplodeEvent e) {
-        // 1. 기본 데미지 설정 (tnt-settings.기본 값이 없으면 10)
+        // 1. 데미지 결정 (기존 로직 유지)
         int dmg = getConfig().getInt("tnt-settings.기본", 10);
-
         if (e.getEntity() != null) {
-            // 엔티티의 타입을 문자열로 가져옴 (예: JEG_ROCKET)
             String entityName = e.getEntity().getType().name().toUpperCase();
-
-            if (entityName.contains("ROCKET")) {
-                dmg = getConfig().getInt("explosion-settings.rocket_launcher", 50);
-            } else if (entityName.contains("EXPLOSIVE_CHARGE")) {
-                dmg = getConfig().getInt("explosion-settings.explosive_charge", 100);
-            } else if (entityName.contains("GRENADE")) {
-                dmg = getConfig().getInt("explosion-settings.grenade", 10);
-            } else if (entityName.contains("PRIMED_TNT")) {
-                dmg = getConfig().getInt("tnt-settings.기본", 10); // 바닐라 TNT 데미지
-            }
+            if (entityName.contains("ROCKET")) dmg = getConfig().getInt("explosion-settings.rocket_launcher", 50);
+            else if (entityName.contains("EXPLOSIVE_CHARGE")) dmg = getConfig().getInt("explosion-settings.explosive_charge", 100);
+            else if (entityName.contains("GRENADE")) dmg = getConfig().getInt("explosion-settings.grenade", 10);
+            else if (entityName.contains("PRIMED_TNT")) dmg = getConfig().getInt("tnt-settings.기본", 10);
         }
-
         final int finalDmg = dmg;
-        Bukkit.getLogger().info("[Debug] 적용될 최종 데미지: " + finalDmg);
 
         Location center = e.getLocation();
         int radius = 5;
 
-        // 2. 주변 블록 탐색 및 데미지 적용
+        // 중복 데미지 방지용 세트 (마스터 블록 좌표 저장)
+        java.util.Set<String> processedBlocks = new java.util.HashSet<>();
+
         for (int x = -radius; x <= radius; x++) {
             for (int y = -radius; y <= radius; y++) {
                 for (int z = -radius; z <= radius; z++) {
-                    Location loc = center.clone().add(x, y, z);
-                    if (loc.distance(center) > radius) continue;
+                    Block b = center.clone().add(x, y, z).getBlock();
+                    if (b.getType() == Material.AIR) continue;
 
-                    Block b = loc.getBlock();
-                    Material type = b.getType();
+                    String typeName = b.getType().name().toUpperCase();
 
-                    if (type.name().contains("_DOOR") || type.name().contains("BIG_DOOR") || type.name().contains("ARMORED_DOOR")) {
-                        // 만약 모드 블록이 마인크래프트 기본 Door 데이터를 가지고 있다면 (하단만 체크)
-                        if (b.getBlockData() instanceof org.bukkit.block.data.type.Door door) {
-                            if (door.getHalf() == org.bukkit.block.data.type.Door.Half.BOTTOM) {
-                                String doorKey = "doors." + blockToKey(b);
-                                if (dataStorage.getConfig().contains(doorKey)) {
-                                    applyDmg(b, finalDmg, null);
-                                }
-                            }
-                        } else {
-                            // 모드 블록이 일반 블록 형태라면 바로 데미지 적용
-                            String pKey = "planks." + blockToKey(b);
-                            if (dataStorage.getConfig().contains(pKey)) {
-                                applyPlankDmg(b, finalDmg, null);
-                            }
+                    // [수정 핵심] 문 계열(더미 포함)인지 확인
+                    boolean isDoor = typeName.contains("_DOOR") || typeName.contains("BIG_DOOR") || typeName.contains("DUMMY") || typeName.contains("ARMORED_DOOR");
+
+                    if (isDoor) {
+                        Block master = getMasterBlock(b);
+                        String masterKey = blockToKey(master);
+
+                        // 이미 이 폭발로 데미지를 입은 문이라면 스킵
+                        if (processedBlocks.contains("door_" + masterKey)) continue;
+
+                        if (dataStorage.getConfig().contains("doors." + masterKey)) {
+                            applyDmg(master, finalDmg, null);
+                            processedBlocks.add("door_" + masterKey);
+                        }
+                    } else {
+                        // 일반 블록(Plank, 터렛 등) 처리
+                        String pKey = blockToKey(b);
+                        if (processedBlocks.contains("plank_" + pKey)) continue;
+
+                        if (dataStorage.getConfig().contains("planks." + pKey)) {
+                            applyPlankDmg(b, finalDmg, null);
+                            processedBlocks.add("plank_" + pKey);
                         }
                     }
                 }
             }
         }
 
-        // 3. 지형 보호
         e.blockList().clear();
         e.setYield(0.0f);
     }
-
     public void applyPlankDmg(Block b, int d, Player p) {
         String rawKey = blockToKey(b);
         String key = "planks." + rawKey;
@@ -932,12 +963,15 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             return;
         }
 
+        Block master = getMasterBlock(b);
         Material type = b.getType();
         String typeName = type.name().toUpperCase();
+        boolean isDoor = typeName.contains("_DOOR") && !typeName.contains("TRAPDOOR");
 
         // 2. 실시간 재질 판별
         String correctName;
         int correctMax;
+
 
         if (typeName.contains("ARMORED_DOOR")) {
             correctName = "합금 문";
@@ -945,6 +979,12 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         } else if (typeName.contains("BIG_DOOR")) {
             correctName = "차고 문";
             correctMax = 600;
+        } else if (typeName.contains("IRON_DOOR")) {
+            correctName = "철 문";
+            correctMax = 200;
+        } else if (isDoor) {
+            correctName = "나무 문";
+            correctMax = 100;
         } else if (type == Material.GOLD_BLOCK) {
             correctName = "자동 터렛";
             correctMax = 200;
@@ -983,6 +1023,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
 
         // --- [수정된 판정 로직] ---
         if (newHp <= 0) {
+            removeLockEntity(master);
             // 파괴되는 경우
             if (type == Material.GOLD_BLOCK) {
                 this.turretManager.dropTurretItems(b.getLocation());
@@ -1001,17 +1042,18 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
                     top.setType(Material.AIR);
                 }
             }
-
             b.getWorld().playSound(b.getLocation(), breakSound, 1.0f, 1.0f);
 
             if (p != null) p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
                     TextComponent.fromLegacyText("§c[System] " + correctName + "이(가) 파괴되었습니다!"));
+            reduceItemDurability(p);
         } else {
             // [중요!] 체력이 남아있는 경우: 블록을 없애면 안 됩니다!
             dataStorage.getConfig().set(key + ".health", newHp); // 줄어든 체력만 저장
             dataStorage.saveConfig();
 
             if (p != null) {
+                reduceItemDurability(p);
                 String progressBar = getProgressBar(newHp, correctMax);
                 p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
                         TextComponent.fromLegacyText("§f[" + correctName + "] " + progressBar + " §f(" + newHp + " / " + correctMax + ")"));
@@ -1021,98 +1063,176 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         }
     }
     public void applyDmg(Block b, int d, Player p) {
-        String key = "doors." + blockToKey(b);
-        String typeName = b.getType().name().toUpperCase();
+        Block master = getMasterBlock(b);
+        String key = "doors." + blockToKey(master);
+        String typeName = master.getType().name().toUpperCase();
 
         // 1. 최대 체력 결정 (기준점)
         int maxHp;
-        if (typeName.contains("ARMORED_DOOR")) maxHp = 800;
-        else if (typeName.contains("BIG_DOOR")) maxHp = 600;
-        else if (typeName.contains("IRON")) maxHp = 200;
-        else maxHp = 100;
+        String displayName;
+
+        // 2. 조건문에 따라 값을 할당합니다.
+        if (typeName.contains("ARMORED_DOOR")) {
+            maxHp = 800;
+            displayName = "합금 문";
+        } else if (typeName.contains("BIG_DOOR")) {
+            maxHp = 600;
+            displayName = "차고 문";
+        } else if (typeName.contains("IRON")) {
+            maxHp = 200;
+            displayName = "철 문";
+        } else {
+            maxHp = 100;
+            displayName = "나무 문";
+        }
         // [수정] dataStorage에서 현재 체력 가져오기
         int currentHp = dataStorage.getConfig().getInt(key + ".health", maxHp);
         int newHp = currentHp - d;
 
         if (newHp <= 0) {
-            // [수정] dataStorage 데이터 삭제
+            // [사운드] 파괴음 재생
+            playModDoorSound(master.getLocation());
+            removeLockEntity(master);
+
+            // [데이터] 제거
             dataStorage.getConfig().set(key, null);
             dataStorage.saveConfig();
 
-            b.setType(Material.AIR);
-            Block top = b.getRelative(0, 1, 0);
-            if (top.getType() == b.getType() || top.getType().name().contains("_DOOR")) {
-                top.setType(Material.AIR);
+            // [블록 제거] 핵심: 차고문인지 일반 문인지 판별해서 지우기
+            if (typeName.contains("BIG_DOOR")) {
+                // 이미 구현하신 4x4 제거 로직 호출
+                removeBigObject(master);
+            } else {
+                // 일반 2칸 높이 문 제거 (마스터부터 위쪽까지)
+                master.setType(Material.AIR);
+                Block top = master.getRelative(0, 1, 0);
+                if (top.getType() == master.getType() || top.getType().name().contains("_DOOR")) {
+                    top.setType(Material.AIR);
+                }
             }
 
             if (p != null) {
                 p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText("§c[System] 문이 파괴되었습니다!"));
+                        TextComponent.fromLegacyText("§c[System] " + displayName + "이(가) 파괴되었습니다!"));
             }
-            b.getWorld().playSound(b.getLocation(), Sound.BLOCK_IRON_DOOR_CLOSE, 1.0f, 0.5f);
+            master.getWorld().playSound(master.getLocation(), Sound.BLOCK_IRON_DOOR_CLOSE, 1.0f, 0.5f);
         } else {
             // [수정] dataStorage 체력 업데이트
             dataStorage.getConfig().set(key + ".health", newHp);
             dataStorage.saveConfig();
 
+            // --- [소리 및 효과 로직 수정] ---
+            // 1. 금속 재질(IRON, ARMORED, BIG)인 경우에만 커스텀 사운드 재생
+            if (typeName.contains("IRON") || typeName.contains("ARMORED") || typeName.contains("BIG")) {
+                playModDoorSound(b.getLocation());
+            } else {
+                // 나무 문 등 기타 재질은 기본 나무 소리만 재생
+                b.getWorld().playSound(b.getLocation(), Sound.BLOCK_WOOD_HIT, 1.0f, 1.2f);
+            }
+
             if (p != null) {
+                reduceItemDurability(p);
                 String progressBar = getProgressBar(newHp, maxHp);
                 p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                        TextComponent.fromLegacyText("§6[Door] 체력: " + progressBar + " §f(" + newHp + " / " + maxHp + ")"));
+                        TextComponent.fromLegacyText("§6[" + displayName + "] " + progressBar + " §f(" + newHp + " / " + maxHp + ")"));
             }
-            Sound hitSound = typeName.contains("IRON") || typeName.contains("DOOR") ? Sound.BLOCK_METAL_HIT : Sound.BLOCK_WOOD_HIT;
-            b.getWorld().playSound(b.getLocation(), hitSound, 1.0f, 1.2f);
+
             b.getWorld().spawnParticle(Particle.CRIT, b.getLocation().add(0.5, 0.5, 0.5), 5);
         }
     }
+    private void playModDoorSound(Location loc) {
+        String soundName = "examplemod:custom_door_break";
+        loc.getWorld().playSound(loc, soundName, 1.0f, 1.0f);
+    }
     public void removeBigObject(Block master) {
-        Material type = master.getType();
-        // 기준점(master)으로부터 위쪽/옆쪽으로 4x4 범위를 탐색하여 동일 재질 제거
-        // (설치 방향에 따라 좌표 조정이 필요할 수 있으나, 보통은 4x4x4 범위를 훑는게 안전함)
-        for (int x = 0; x < 4; x++) {
-            for (int y = 0; y < 4; y++) {
-                for (int z = 0; z < 4; z++) {
+        if (master == null) return;
+
+        // 마스터 블록의 좌표와 타입
+        Location masterLoc = master.getLocation();
+        String masterTypeName = master.getType().name().toUpperCase();
+
+        // 마스터 블록을 중심으로 전후좌우 4칸, 위로 4칸 범위를 탐색 (안전 범위)
+        int radius = 4;
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = 0; y <= 4; y++) {
+                for (int z = -radius; z <= radius; z++) {
                     Block rel = master.getRelative(x, y, z);
-                    if (rel.getType() == type) {
+
+                    if (rel.getType() == Material.AIR) continue;
+
+                    // [핵심] 이 블록이 현재 마스터와 연결된 블록인지 확인
+                    if (isSameDoorSystem(rel, master)) {
                         rel.setType(Material.AIR);
                     }
-                    // 반대 방향(-x, -z)도 체크가 필요하다면 범위를 -2 ~ 2로 잡으셔도 됩니다.
                 }
             }
         }
+        // 마스터 본인도 확실히 제거
+        master.setType(Material.AIR);
+    }
+
+    // 해당 블록이 이 마스터의 부속(더미)인지 확인하는 정밀 로직
+    private boolean isSameDoorSystem(Block target, Block master) {
+        // 1. 마스터 본인인 경우
+        if (target.getLocation().equals(master.getLocation())) return true;
+
+        // 2. 타겟이 DUMMY 블록인 경우
+        if (target.getType().name().contains("DUMMY")) {
+            // [중요] getMasterBlock을 호출했을 때 방금 지우려는 그 master가 나오는지 확인
+            // 이 로직이 있어야 옆에 있는 다른 문의 DUMMY를 건드리지 않습니다.
+            Block foundMaster = getMasterBlock(target);
+            return foundMaster != null && foundMaster.getLocation().equals(master.getLocation());
+        }
+
+        return false;
+    }
+    // 시계 방향 계산 유틸리티
+    private org.bukkit.block.BlockFace getRightFace(org.bukkit.block.BlockFace facing) {
+        return switch (facing) {
+            case NORTH -> org.bukkit.block.BlockFace.EAST;
+            case EAST -> org.bukkit.block.BlockFace.SOUTH;
+            case SOUTH -> org.bukkit.block.BlockFace.WEST;
+            case WEST -> org.bukkit.block.BlockFace.NORTH;
+            default -> org.bukkit.block.BlockFace.SELF;
+        };
+    }
+    private boolean isDummyOfMaster(Block target, Block master) {
+        // 1. 타겟 블록이 공기면 당연히 대상이 아님
+        if (target.getType() == Material.AIR) return false;
+
+        String targetName = target.getType().name().toUpperCase();
+
+        // 2. 타겟 블록이 'DUMMY' 혹은 'DOOR_DUMMY' 이름을 포함하고 있는지 확인
+        if (targetName.contains("DUMMY")) {
+            // 3. (선택적) 더 정밀하게 하려면 마스터와 더미의 거리를 체크 (빅 도어는 보통 4칸 이내)
+            double distance = target.getLocation().distance(master.getLocation());
+            return distance <= 6.0; // 4x4 문이므로 대각선 거리 고려 약 6칸 이내면 같은 문으로 판단
+        }
+
+        return false;
     }
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDummyBlockBreak(BlockBreakEvent e) {
         Block b = e.getBlock();
         Player p = e.getPlayer();
+        if (p.getGameMode() == org.bukkit.GameMode.CREATIVE) return;
 
-        Block master = getMasterBlock(b); // 기준점 찾기 (4x4, 2칸 높이 대응)
-        String masterKey = blockToKey(master);
         String typeName = b.getType().name().toUpperCase();
 
-        String plankPath = "planks." + masterKey;
-        String doorPath = "doors." + masterKey;
-        boolean isModBlock = typeName.contains("ARMORED_DOOR") || typeName.contains("BIG_DOOR");
-
-        // 데이터가 있거나 모드 블록인 경우
-        if (dataStorage.getConfig().contains(plankPath) || dataStorage.getConfig().contains(doorPath) || isModBlock) {
-            // 1. [중요] 실제 블록 파괴를 취소 (사라지지 않게 함)
+        if (typeName.contains("DUMMY") || (typeName.contains("BIG_DOOR") && !b.equals(getMasterBlock(b)))) {
             e.setCancelled(true);
 
-            // 2. 데미지 적용 (한 번 부술 때마다 데미지 1 차감)
-            // 만약 도구에 따라 더 많이 깎고 싶다면 여기서 도구 체크를 합니다.
-            int damage = 1;
-            if (dataStorage.getConfig().contains(doorPath)) {
-                applyDmg(master, damage, p);
-            } else {
-                applyPlankDmg(master, damage, p);
-            }
-            // 블록이 파괴되는 시각적 효과를 주기 위해 패킷을 보내거나 소리를 재생할 수 있습니다.
-            master.getWorld().playSound(master.getLocation(), Sound.BLOCK_METAL_HIT, 1.0f, 1.0f);
+            Block master = getMasterBlock(b);
+
+            long now = System.currentTimeMillis();
+            if (breakCooldown.getOrDefault(p.getUniqueId(), 0L) > now) return;
+            breakCooldown.put(p.getUniqueId(), now + 150);
+
+            // 더미를 때려도 본체(master)에 데미지 전달
+            applyDmg(master, 1, p);
         }
     }
     // 체력을 시각적인 바로 변환해주는 메서드
-
     public String getProgressBar(int current, int max) {
 
         int bars = 10; // 총 칸 수
@@ -1136,8 +1256,8 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     }
 
     public String blockToKey(Block b) {
-        Location l = b.getLocation();
-        return l.getWorld().getName() + "_" + l.getBlockX() + "_" + l.getBlockY() + "_" + l.getBlockZ();
+        if (b == null) return "";
+        return b.getWorld().getName() + "_" + b.getX() + "_" + b.getY() + "_" + b.getZ();
     }
     @EventHandler
     public void onDrink(PlayerItemConsumeEvent event) {
@@ -1215,6 +1335,64 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         if (event.getSource().getType() == Material.VINE) {
             // 2. 이벤트 취소 (번지지 못하게 함)
             event.setCancelled(true);
+        }
+    }
+    public void reduceItemDurability(Player player) {
+        if (player == null) return;
+        if (player.getGameMode() == org.bukkit.GameMode.CREATIVE) return; // 크리에이티브 모드 제외
+
+        ItemStack item = player.getInventory().getItemInMainHand();
+        if (item == null || item.getType() == Material.AIR) return;
+
+        // 아이템의 메타데이터 확인 (내구도가 있는 아이템인지 확인)
+        org.bukkit.inventory.meta.ItemMeta meta = item.getItemMeta();
+        if (meta instanceof org.bukkit.inventory.meta.Damageable damageable) {
+            // 내구도 1 감소
+            damageable.setDamage(damageable.getDamage() + 1);
+            item.setItemMeta(damageable);
+
+            // 내구도가 다 달았으면 파괴 소리와 함께 제거
+            if (damageable.getDamage() >= item.getType().getMaxDurability()) {
+                player.getInventory().setItemInMainHand(null);
+                player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 1.0f, 1.0f);
+            }
+        }
+    }
+    public void removeLockEntity(Block master) {
+        String blockKey = blockToKey(master);
+        FileConfiguration lockConfig = getLockConfig(); // lock.yml
+        String path = "locks." + blockKey + ".uuids";
+
+        if (lockConfig.contains(path)) {
+            List<String> uuids = lockConfig.getStringList(path);
+            for (String uuidStr : uuids) {
+                try {
+                    UUID uuid = UUID.fromString(uuidStr);
+                    Entity ent = Bukkit.getEntity(uuid);
+                    if (ent != null) ent.remove();
+                } catch (Exception ignored) {}
+            }
+            lockConfig.set("locks." + blockKey, null);
+            saveLockConfig();
+        }
+    }
+    public void createLockConfig() {
+        lockFile = new File(getDataFolder(), "lock.yml");
+        if (!lockFile.exists()) {
+            lockFile.getParentFile().mkdirs();
+            saveResource("lock.yml", false);
+        }
+        lockConfig = YamlConfiguration.loadConfiguration(lockFile);
+    }
+
+    public FileConfiguration getLockConfig() {
+        return this.lockConfig;
+    }
+    public void saveLockConfig() {
+        try {
+            lockConfig.save(lockFile);
+        } catch (java.io.IOException e) {
+            e.printStackTrace();
         }
     }
 }

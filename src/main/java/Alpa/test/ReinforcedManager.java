@@ -88,14 +88,6 @@ public class ReinforcedManager implements Listener {
         }
         return null;
     }
-    @EventHandler
-    public void onProtectBlockPlace(BlockPlaceEvent event) {
-        if (event.getBlock().getType() == Material.REINFORCED_DEEPSLATE) {
-            protectedLocations.add(event.getBlock().getLocation());
-            saveData(); // 설치 시 즉시 저장
-            event.getPlayer().sendMessage("§a[보호] §f이 지역 반경 30블록이 보호됩니다.");
-        }
-    }
 
     @EventHandler
     public void onProtectBlockBreak(BlockBreakEvent event) {
@@ -108,20 +100,19 @@ public class ReinforcedManager implements Listener {
         }
     }
 
-    @EventHandler
+    // 기존에 2개였던 BlockPlaceEvent를 이 하나로 통합하세요.
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockPlace(BlockPlaceEvent event) {
         Material type = event.getBlock().getType();
         Location loc = event.getBlock().getLocation();
         Player player = event.getPlayer();
 
-        // 1. 설치하려는 위치가 이미 보호 구역(심층암 30칸) 또는 성역(자수정 200칸)인지 확인
         if (isProtected(loc, player)) {
             event.setCancelled(true);
             player.sendMessage("§c[경고] §f이곳은 블록을 설치할 수 없습니다.");
-            return;
+            return; // 여기서 return을 해줘야 아래 로직이 실행되지 않아 메시지가 1번만 뜹니다.
         }
 
-        // 2. 보호 블록 설치 로직
         if (type == Material.REINFORCED_DEEPSLATE) {
             protectedLocations.add(loc);
             saveData();
@@ -342,5 +333,12 @@ public class ReinforcedManager implements Listener {
                 name.contains("FLAMETHROWER") ||
                 name.contains("RAID") ||
                 displayName.contains("총");
+    }
+    public List<Location> getProtectedLocations() {
+        return protectedLocations;
+    }
+
+    public List<Location> getPeaceLocations() {
+        return peaceLocations;
     }
 }

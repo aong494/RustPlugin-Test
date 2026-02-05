@@ -39,9 +39,20 @@ public class PlankHealthManager implements Listener {
         String configKey = gunId.replace(":", "_");
         int finalDamage = plugin.gunDamageConfig.getInt("guns." + configKey, 1);
 
-        // 2. [핵심 수정] 직접 계산하지 말고 main의 applyPlankDmg를 호출합니다.
-        // 이렇게 해야 터렛 이름, 체력 로직이 한 곳에서 통합 관리됩니다.
-        plugin.applyPlankDmg(block, finalDamage, null);
+        // 2. 블록 타입 확인
+        Material type = block.getType();
+        String typeName = type.name().toUpperCase();
+
+        // 문 계열(합금문, 차고문, 일반문, 더미 포함)인지 확인
+        boolean isDoor = typeName.contains("_DOOR") || typeName.contains("BIG_DOOR") || typeName.contains("DUMMY");
+
+        if (isDoor) {
+            // [수정] 문일 경우 applyDmg 호출 (마스터 블록은 applyDmg 내부에서 찾으므로 block 그대로 전달)
+            plugin.applyDmg(block, finalDamage, null);
+        } else {
+            // 일반 블록(판자, 터렛 등)일 경우 기존 로직 유지
+            plugin.applyPlankDmg(block, finalDamage, null);
+        }
     }
     private boolean isTargetBlock(Material material) {
         if (material == null) return false;
@@ -50,7 +61,8 @@ public class PlankHealthManager implements Listener {
 
         String name = material.name().toUpperCase();
 
-        if (name.contains("BIG_DOOR") || name.contains("ARMORED_DOOR")) return true;
+        // "TRAPDOOR"(다락문)는 제외하고 모든 "DOOR"가 포함된 블록을 잡습니다.
+        if (name.contains("DOOR") && !name.contains("TRAPDOOR")) return true;
 
         // 2. 철제 구조물 (철 블록 및 철 계단 - 모드나 추가 재질 대비)
         boolean isIron = name.contains("IRON_BLOCK") || (name.contains("IRON") && name.contains("_STAIRS"));
@@ -73,31 +85,42 @@ public class PlankHealthManager implements Listener {
         Material type = b.getType();
         if (!isTargetBlock(type)) return;
 
-        String key = plugin.blockToKey(b);
-        String path = "planks." + key;
-        String typeName = type.name();
+        // 1. 문인지 확인 (철문, 합금문, 차고문 등 포함)
+        String typeName = type.name().toUpperCase();
+        boolean isDoor = typeName.contains("_DOOR") && !typeName.contains("TRAPDOOR");
+
+        // 2. [핵심 수정] 문은 doors. 경로를, 일반 블럭은 planks. 경로를 사용하게 합니다.
+        String key = plugin.blockToKey(isDoor ? plugin.getMasterBlock(b) : b);
+        String category = isDoor ? "doors." : "planks.";
+        String path = category + key;
 
         int initialHp;
         String displayName;
-
         // --- [이름 및 체력 판별 로직 수정] ---
+
         if (typeName.contains("ARMORED_DOOR")) {
             initialHp = 800; // 무장 문 체력 설정
             displayName = "합금 문";
-        } else if (typeName.contains("BIG_DOOR")) {
+        }else if (typeName.contains("BIG_DOOR")) {
             initialHp = 600; // 차고 문(Big Door) 체력 설정
             displayName = "차고 문";
-        } else if (type == Material.GOLD_BLOCK) {
+        }else if (typeName.contains("IRON_DOOR")) {
+            initialHp = 200;
+            displayName = "철 문";
+        }else if (isDoor) {
+            initialHp = 100;
+            displayName = "나무 문";
+        }else if (type == Material.GOLD_BLOCK) {
             // 기존 터렛 로직...
             initialHp = plugin.turretConfig.getInt("settings.max_health", 200);
             displayName = plugin.turretConfig.getString("settings.display_name", "자동 터렛");
         }else if (typeName.contains("IRON")) {
             initialHp = 200;
             displayName = "철제 구조물";
-        } else if (typeName.contains("STONE_BRICK")) {
+        }else if (typeName.contains("STONE_BRICK")) {
             initialHp = 100;
             displayName = "석재 구조물";
-        } else {
+        }else {
             initialHp = 50;
             displayName = "나무 구조물";
         }
@@ -105,8 +128,7 @@ public class PlankHealthManager implements Listener {
         // data.yml에 저장
         plugin.dataStorage.getConfig().set(path + ".health", initialHp);
         plugin.dataStorage.getConfig().set(path + ".max_health", initialHp);
-        plugin.dataStorage.getConfig().set(path + ".display_name", displayName); // 여기서 "철제", "석재" 등이 저장됨
-        plugin.dataStorage.getConfig().set(path + ".owner", e.getPlayer().getUniqueId().toString());
+        plugin.dataStorage.getConfig().set(path + ".display_name", displayName);
 
         plugin.dataStorage.saveConfig();
     }
@@ -122,29 +144,51 @@ public class PlankHealthManager implements Listener {
         Player p = e.getPlayer();
         ItemStack item = p.getInventory().getItemInMainHand();
         // 막대기를 들고 있을 때만 정보 표시
-        if (p.getInventory().getItemInMainHand().getType() == Material.STICK) {
-            String rawKey = plugin.blockToKey(b);
-            String path = "planks." + rawKey;
+        if (item.getType() == Material.STICK) {
+            Material type = b.getType();
+            String typeName = type.name().toUpperCase();
 
-            // 데이터가 없는 블록이면 무시
+            // 1. [추가] 문 여부 확인 및 경로 결정
+            // 문(모드 문 포함)은 "doors." 경로를, 일반 구조물은 "planks." 경로를 사용합니다.
+            boolean isBigDoor = typeName.contains("BIG_DOOR") || typeName.contains("DOOR_DUMMY");
+            boolean isDoor = typeName.contains("_DOOR") && !typeName.contains("TRAPDOOR") || isBigDoor;
+
+            String category = isDoor ? "doors." : "planks.";
+
+            // 문은 항상 하단 블록(BOTTOM) 기준으로 데이터를 읽어야 하므로 getMasterBlock 사용
+            Block master = isDoor ? plugin.getMasterBlock(b) : b;
+            Material masterType = master.getType();
+            String masterTypeName = masterType.name().toUpperCase();
+
+            String rawKey = plugin.blockToKey(master);
+            String path = category + rawKey;
+
             if (!plugin.dataStorage.getConfig().contains(path)) return;
 
             e.setCancelled(true);
 
-            // 1. [핵심] 실시간으로 실제 블록 재질 판별 (좌클릭 로직과 동일하게)
-            Material type = b.getType();
-            String typeName = type.name().toUpperCase();
-
             String correctName;
             int correctMax;
 
-            if (type == Material.GOLD_BLOCK) {
+            if (masterTypeName.contains("ARMORED_DOOR")) {
+                correctName = "합금 문";
+                correctMax = 800;
+            } else if (masterTypeName.contains("BIG_DOOR")) {
+                correctName = "차고 문";
+                correctMax = 600;
+            } else if (masterTypeName.contains("IRON_DOOR")) {
+                correctName = "철 문";
+                correctMax = 200;
+            } else if (isDoor) {
+                correctName = "나무 문";
+                correctMax = 100;
+            } else if (masterType == Material.GOLD_BLOCK) {
                 correctName = "자동 터렛";
                 correctMax = 200;
-            } else if (typeName.contains("IRON_BLOCK")) {
+            } else if (masterTypeName.contains("IRON_BLOCK")) {
                 correctName = "철제 구조물";
                 correctMax = 200;
-            } else if (typeName.contains("STONE_BRICKS")) {
+            } else if (masterTypeName.contains("STONE_BRICK")) {
                 correctName = "석재 구조물";
                 correctMax = 100;
             } else {
