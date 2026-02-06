@@ -38,6 +38,8 @@ import org.bukkit.scoreboard.ScoreboardManager;
 import java.io.*;
 import java.lang.reflect.Type;
 import java.util.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import com.google.gson.*;
 import com.google.gson.reflect.TypeToken;
 
@@ -77,6 +79,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     private FileConfiguration lockConfig;
     public HologramManager hologramManager;
     public DoorManager doorManager;
+    public BlockDecayManager blockDecayManager;
 
     @Override
         public void onEnable() {
@@ -109,6 +112,11 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             this.reinforcedManager = new ReinforcedManager(this);
             this.hologramManager = new HologramManager(this);
             this.doorManager = new DoorManager(this);
+            this.blockDecayManager = new BlockDecayManager(this);
+            this.blockDecayManager.runTaskTimer(this, 200L, 1200L);
+            this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:main_channel");
+            this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:messages");
+
 
             addDefaultSettings();
         org.bukkit.plugin.PluginManager pm = getServer().getPluginManager();
@@ -1394,6 +1402,29 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         } catch (java.io.IOException e) {
             e.printStackTrace();
         }
+    }
+    public void sendMaintenancePacket(Player player, boolean isDecaying, String costStr) {
+        if (!getServer().getMessenger().getOutgoingChannels(this).contains("examplemod:messages")) {
+            return;
+        }
+        try {
+            java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+            java.io.DataOutputStream out = new java.io.DataOutputStream(b);
+            out.writeByte(6);
+            out.writeBoolean(isDecaying);
+            out.writeUTF(costStr);
+
+            player.sendPluginMessage(this, "examplemod:messages", b.toByteArray());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    private void writeVarInt(java.io.DataOutputStream out, int value) throws java.io.IOException {
+        while ((value & -128) != 0) {
+            out.writeByte(value & 127 | 128);
+            value >>>= 7;
+        }
+        out.writeByte(value);
     }
 }
 

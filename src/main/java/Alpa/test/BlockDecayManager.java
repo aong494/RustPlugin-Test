@@ -8,6 +8,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.Container; // 심볼 해결을 위해 반드시 필요
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -23,6 +24,51 @@ public class BlockDecayManager extends BukkitRunnable {
 
     public BlockDecayManager(main plugin) {
         this.plugin = plugin;
+    }
+    public MaintenanceResult getMaintenanceStatus(Location cupLoc) {
+        ConfigurationSection dataConfig = plugin.dataStorage.getConfig();
+        FileConfiguration mConfig = plugin.maintenanceConfig;
+
+        Map<Material, Integer> totalCosts = new HashMap<>();
+
+        // 1. 반경 내 블록 스캔 (기존 로직 활용)
+        int radius = mConfig.getInt("settings.radius", 15);
+        // 예시 데이터: 돌 100개, 나무 200개라고 가정
+        Map<Material, Integer> counts = new HashMap<>();
+        // counts = scanBlocksInRadius(cupLoc, radius);
+
+        for (Map.Entry<Material, Integer> entry : counts.entrySet()) {
+            String typeKey = getSettingKey(entry.getKey());
+            String path = "costs." + typeKey;
+            if (!mConfig.contains(path)) continue;
+
+            Material costItem = Material.valueOf(mConfig.getString(path + ".item"));
+            int perAmount = mConfig.getInt(path + ".amount", 10);
+            int costQty = mConfig.getInt(path + ".cost", 1);
+            int totalRequired = (int) Math.ceil((double) entry.getValue() / perAmount) * costQty;
+
+            totalCosts.put(costItem, totalCosts.getOrDefault(costItem, 0) + totalRequired);
+        }
+
+        // 2. 인벤토리 체크
+        Inventory inv = getInventoryAt(cupLoc);
+        boolean isDecaying = false;
+        List<String> costTexts = new ArrayList<>();
+
+        for (Map.Entry<Material, Integer> cost : totalCosts.entrySet()) {
+            int current = countItem(inv, cost.getKey());
+            if (current < cost.getValue()) isDecaying = true;
+            costTexts.add(getItemKoreanName(cost.getKey()) + " x" + cost.getValue());
+        }
+
+        return new MaintenanceResult(isDecaying, String.join(", ", costTexts));
+    }
+
+    // 결과값 전달용 내부 클래스
+    public static class MaintenanceResult {
+        public final boolean isDecaying;
+        public final String costString;
+        public MaintenanceResult(boolean d, String c) { this.isDecaying = d; this.costString = c; }
     }
 
     @Override
@@ -85,27 +131,110 @@ public class BlockDecayManager extends BukkitRunnable {
 
         plugin.dataStorage.saveConfig();
     }
-    private Inventory getInventoryAt(Location loc) {
-        Block block = loc.getBlock();
+    // BlockDecayManager 클래스 내부에 추가/수정
 
-        if (block.getType() == Material.TRAPPED_CHEST) {
-            if (block.getState() instanceof org.bukkit.block.Chest chest) {
-                return chest.getInventory(); // 100% 성공 보장
+    public void syncMaintenanceToPlayer(Player player, Location cupLoc) {
+        ConfigurationSection dataConfig = plugin.dataStorage.getConfig();
+        FileConfiguration mConfig = plugin.maintenanceConfig;
+
+        // 1. 해당 도구함 영향권 내 실제 블록 수 합산
+        Map<Material, Integer> counts = new HashMap<>();
+        int radius = mConfig.getInt("settings.radius", 15);
+
+        // dataConfig에서 planks와 doors를 스캔하여 이 도구함(cupLoc) 범위 내 블록만 카운트
+        countBlocksForCupboard(dataConfig.getConfigurationSection("planks"), cupLoc, radius, counts);
+        countBlocksForCupboard(dataConfig.getConfigurationSection("doors"), cupLoc, radius, counts);
+
+        // 2. 소모량 계산
+        Map<Material, Integer> totalCosts = new HashMap<>();
+        for (Map.Entry<Material, Integer> entry : counts.entrySet()) {
+            String typeName = getSettingKey(entry.getKey());
+            String path = "costs." + typeName;
+            if (!mConfig.contains(path)) continue;
+
+            Material costItem = Material.valueOf(mConfig.getString(path + ".item"));
+            int perAmount = mConfig.getInt(path + ".amount", 10);
+            int costQty = mConfig.getInt(path + ".cost", 1);
+            int totalRequired = (int) Math.ceil((double) entry.getValue() / perAmount) * costQty;
+
+            totalCosts.put(costItem, totalCosts.getOrDefault(costItem, 0) + totalRequired);
+        }
+
+        // 3. 인벤토리 체크 및 텍스트 생성
+        Inventory inv = getInventoryAt(cupLoc);
+        boolean isDecaying = false;
+        List<String> costStrings = new ArrayList<>();
+
+        for (Map.Entry<Material, Integer> cost : totalCosts.entrySet()) {
+            int currentInInv = (inv == null) ? 0 : countItemInInventory(inv, cost.getKey());
+            if (currentInInv < cost.getValue()) isDecaying = true;
+            costStrings.add(getItemKoreanName(cost.getKey()) + " x" + cost.getValue());
+        }
+
+        String finalCostStr = costStrings.isEmpty() ? "자원 필요 없음" : String.join(", ", costStrings);
+
+        // 4. Forge 클라이언트로 패킷 전송 (브릿지 메서드 호출)
+        // 이 부분은 본인의 패킷 전송 방식(ex: ModMessages.sendToPlayer)에 맞춰 작성
+        plugin.sendMaintenancePacket(player, isDecaying, finalCostStr);
+    }
+
+    // 특정 도구함 범위 내 블록 개수를 세는 헬퍼 메서드
+    private void countBlocksForCupboard(ConfigurationSection section, Location cupLoc, int radius, Map<Material, Integer> counts) {
+        if (section == null) return;
+        for (String key : section.getKeys(false)) {
+            if (isBlockInRadius(key, cupLoc, radius)) {
+                Block b = getBlockFromKey(key);
+                if (b != null) {
+                    Material mat = b.getType();
+                    counts.put(mat, counts.getOrDefault(mat, 0) + 1);
+                }
             }
         }
+    }
+
+    // 인벤토리 내 특정 아이템 개수를 세는 메서드
+    private int countItemInInventory(Inventory inv, Material mat) {
+        int count = 0;
+        for (ItemStack is : inv.getContents()) {
+            if (is != null && is.getType() == mat) count += is.getAmount();
+        }
+        return count;
+    }
+    private Inventory getInventoryAt(Location loc) {
+        // 1. 저장된 위치 바로 위 체크 (기본값)
+        Block above = loc.clone().add(0, 1, 0).getBlock();
+        if (above.getType() == Material.TRAPPED_CHEST) {
+            if (above.getState() instanceof org.bukkit.block.Chest chest) return chest.getInventory();
+        }
+
+        // 2. 저장된 위치 그 자체 체크 (혹시 상자 위치가 저장되었을 경우)
+        Block current = loc.getBlock();
+        if (current.getType() == Material.TRAPPED_CHEST) {
+            if (current.getState() instanceof org.bukkit.block.Chest chest) return chest.getInventory();
+        }
+
+        // 3. 저장된 위치 2칸 위 체크 (혹시 바닥 좌표가 저장되었을 경우)
+        Block above2 = loc.clone().add(0, 2, 0).getBlock();
+        if (above2.getType() == Material.TRAPPED_CHEST) {
+            if (above2.getState() instanceof org.bukkit.block.Chest chest) return chest.getInventory();
+        }
+
+        // [디버그] 그래도 못 찾았다면 주변 블록 상태 출력
+        System.out.println("[디버그] 상자 감지 실패! 위치: " + loc.getBlockX() + ", " + loc.getBlockY() + ", " + loc.getBlockZ());
+        System.out.println("  - 현재(Y): " + current.getType());
+        System.out.println("  - 위(Y+1): " + above.getType());
+        System.out.println("  - 위위(Y+2): " + above2.getType());
+
         return null;
     }
     private void updateStatusAtLocation(Location loc, Set<String> missing) {
-        org.bukkit.block.BlockState state = loc.getBlock().getState();
-        // Container 인터페이스가 이름을 바꿀 수 있는 상위 객체입니다.
-        if (!(state instanceof Container)) {
-            state = loc.getBlock().getRelative(0, 1, 0).getState();
-        }
+        Block chestBlock = loc.clone().add(0, 1, 0).getBlock();
+        org.bukkit.block.BlockState state = chestBlock.getState();
 
         if (state instanceof Container container) {
             String status = (missing == null || missing.isEmpty()) ? "§a[보호 중]" : "§c[재료 부족]";
             container.setCustomName(status + " 도구함");
-            state.update(true);
+            state.update(true, false); // 물리적 업데이트는 필요 없으므로 false
         }
     }
 
@@ -141,6 +270,20 @@ public class BlockDecayManager extends BukkitRunnable {
 
             Location cupLoc = findMaintenanceLocation(b);
             if (cupLoc != null) {
+                // [추가] 실제 해당 좌표에 도구함 블록이 존재하는지 확인
+                Block actualBlock = cupLoc.getBlock();
+                if (!actualBlock.getType().name().contains("TOOL_CUPBOARD")) {
+                    // 블록이 없는데 데이터만 남아있는 경우 (유령 데이터 제거)
+                    String cupKey = plugin.blockToKey(actualBlock);
+                    plugin.dataStorage.getConfig().set("protectors." + cupKey, null);
+                    plugin.dataStorage.saveConfig();
+                    System.out.println("[디버그] 존재하지 않는 도구함 데이터 삭제됨: " + cupKey);
+
+                    unmaintained.add(key); // 보호받지 못하는 블록으로 처리
+                    continue;
+                }
+
+                // 정상이면 카운트 진행
                 counts.computeIfAbsent(cupLoc, k -> new HashMap<>());
                 Material logicType = b.getType();
                 if (logicType == Material.AIR) {
@@ -152,7 +295,6 @@ public class BlockDecayManager extends BukkitRunnable {
             }
         }
     }
-
     private void removeItemFromInventory(Inventory inv, Material material, int amount) {
         ItemStack[] contents = inv.getContents();
         int remaining = amount;
@@ -232,5 +374,15 @@ public class BlockDecayManager extends BukkitRunnable {
             case OAK_PLANKS: return "나무판자";
             default: return mat.name();
         }
+    }
+    public int countItem(Inventory inv, Material mat) {
+        if (inv == null) return 0;
+        int total = 0;
+        for (ItemStack item : inv.getContents()) {
+            if (item != null && item.getType() == mat) {
+                total += item.getAmount();
+            }
+        }
+        return total;
     }
 }

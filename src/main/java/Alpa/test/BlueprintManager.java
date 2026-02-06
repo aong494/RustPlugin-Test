@@ -58,16 +58,22 @@ public class BlueprintManager implements Listener {
 
         // 설치될 기준 위치 (바라보는 블록의 윗칸)
         Location baseLoc = targetBlock.getLocation().add(0, 1, 0);
-
-        // 위치 변화가 없으면 업데이트 스킵
         if (baseLoc.equals(lastBaseLoc.get(player.getUniqueId()))) return;
-
         clearHologram(player);
         lastBaseLoc.put(player.getUniqueId(), baseLoc);
 
+        ItemStack hand = player.getInventory().getItemInMainHand();
+        String fullItemName = (hand != null) ? hand.toString().toLowerCase() : "";
+        boolean isCupboard = fullItemName.contains("tool_cupboard");
+
         String name = material.name().toUpperCase();
         int width = name.contains("BIG_DOOR") ? 4 : 1;
-        int height = name.contains("BIG_DOOR") ? 4 : (name.contains("DOOR") ? 2 : 1);
+        int height = 1;
+        if (name.contains("BIG_DOOR")) {
+            height = 4;
+        } else if (name.contains("DOOR") || isCupboard) {
+            height = 2; // 도구함일 때 여기서 2칸으로 설정됩니다.
+        }
 
         // 홀로그램이 차지할 모든 좌표 리스트
         List<Location> locs = getStructureLocations(baseLoc, player.getFacing(), width, height);
@@ -188,14 +194,32 @@ public class BlueprintManager implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlaceAttempt(PlayerInteractEvent e) {
         if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+
         Player player = e.getPlayer();
         ItemStack hand = player.getInventory().getItemInMainHand();
-        if (hand == null || !hand.getType().isBlock()) return;
+        if (hand == null || hand.getType() == Material.AIR) return;
+
+        // 도구함 판정
+        String itemName = hand.toString().toLowerCase();
+        boolean isCupboard = itemName.contains("tool_cupboard");
 
         Block target = e.getClickedBlock().getRelative(e.getBlockFace());
-        String name = hand.getType().name();
-        int width = name.contains("BIG_DOOR") ? 4 : 1;
-        int height = name.contains("BIG_DOOR") ? 4 : (name.contains("DOOR") ? 2 : 1);
+
+        // [중요] 도구함 설치 시도 시 거리 체크
+        if (isCupboard) {
+            if (isInsideAnyProtector(target.getLocation())) {
+                e.setCancelled(true); // 설치 취소
+                player.sendMessage("§c다른 도구함의 범위(15칸)와 겹쳐서 이곳에 설치할 수 없습니다!");
+                return;
+            }
+        }
+
+        // 기존의 문(Door) 너비/높이 및 건축 권한 체크 로직
+        String materialName = hand.getType().name();
+        int width = materialName.contains("BIG_DOOR") ? 4 : 1;
+        int height = 1;
+        if (materialName.contains("BIG_DOOR")) height = 4;
+        else if (materialName.contains("DOOR") || isCupboard) height = 2;
 
         List<Location> locs = getStructureLocations(target.getLocation(), player.getFacing(), width, height);
 
@@ -203,5 +227,26 @@ public class BlueprintManager implements Listener {
             e.setCancelled(true);
             player.updateInventory();
         }
+    }
+    private boolean isInsideAnyProtector(Location loc) {
+        ConfigurationSection protectors = plugin.dataStorage.getConfig().getConfigurationSection("protectors");
+        if (protectors == null) return false;
+
+        for (String key : protectors.getKeys(false)) {
+            String worldName = protectors.getString(key + ".world");
+            if (worldName == null || !worldName.equals(loc.getWorld().getName())) continue;
+
+            // getInt 대신 getDouble을 사용하여 더 정확하게 비교합니다.
+            double px = protectors.getDouble(key + ".x");
+            double py = protectors.getDouble(key + ".y");
+            double pz = protectors.getDouble(key + ".z");
+            Location protectorLoc = new Location(loc.getWorld(), px, py, pz);
+
+            // 반경 15칸 이내에 도구함 데이터가 있으면 true 반환
+            if (protectorLoc.distance(loc) <= 30) {
+                return true;
+            }
+        }
+        return false;
     }
 }

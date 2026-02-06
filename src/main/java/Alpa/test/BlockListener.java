@@ -12,6 +12,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
@@ -71,17 +72,17 @@ public class BlockListener implements Listener {
     );
     private boolean isToolCupboard(Block b) {
         if (b == null) return false;
-        String typeName = b.getType().name();
 
-        // [수정] 모드 블록 이름 또는 덫상자 체크
-        return typeName.contains("TOOL_CUPBOARD") || b.getType() == Material.TRAPPED_CHEST;
-    }
-
-    private boolean checkBlock(Block b) {
-        if (b.getType() == Material.TRAPPED_CHEST) return true;
-        if (b.getState() instanceof org.bukkit.block.Chest chest) {
-            return chest.getCustomName() != null && chest.getCustomName().contains("도구함");
+        // 1. 덫 상자(위)를 클릭했을 때 -> 그 아래가 모드 블록인지 확인
+        if (b.getType() == Material.TRAPPED_CHEST) {
+            return b.getRelative(0, -1, 0).getType().name().contains("TOOL_CUPBOARD");
         }
+
+        // 2. 모드 블록(아래)을 클릭했을 때 -> 그 위가 덫 상자인지 확인
+        if (b.getType().name().contains("TOOL_CUPBOARD")) {
+            return b.getRelative(0, 1, 0).getType() == Material.TRAPPED_CHEST;
+        }
+
         return false;
     }
 
@@ -194,56 +195,48 @@ public class BlockListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent event) {
         Block block = event.getBlock();
-        Material originalType = block.getType();
 
-        if (originalType.name().contains("TOOL_CUPBOARD")) {
-            event.setCancelled(true); // 1. 이벤트 취소
+        if (block.getType().name().contains("TOOL_CUPBOARD")) {
+            event.setCancelled(true);
 
             Location bottomLoc = block.getLocation();
             Location topLoc = bottomLoc.clone().add(0, 1, 0);
 
-            // [수정된 체크 로직]
+            // 1. 위칸 상자 즉시 설치
             Block topBlock = topLoc.getBlock();
-            Material topMat = topBlock.getType();
-
-            // 윗칸이 공기가 아니고, 풀/눈/물처럼 겹쳐 설치 가능한 블록도 아니라면 설치 중단
-            if (topMat != Material.AIR && !isReplaceableMaterial(topMat)) {
-                event.getPlayer().sendMessage("§c설치할 공간이 부족합니다. (위쪽이 막혀있음)");
-                return;
-            }
-
-            // 2. 아래칸: 덫상자 설치 (물리 업데이트 false)
-            bottomLoc.getBlock().setType(Material.TRAPPED_CHEST, false);
-            if (bottomLoc.getBlock().getState() instanceof org.bukkit.block.Chest chest) {
+            topBlock.setType(Material.TRAPPED_CHEST, true);
+            if (topBlock.getState() instanceof org.bukkit.block.Chest chest) {
                 chest.setCustomName("도구함");
-                chest.update(true, false);
+                chest.update(true, true);
             }
 
-            // 3. 윗칸: 모드 블록 설치
-            topBlock.setType(originalType, false);
-            org.bukkit.block.data.BlockData data = topBlock.getBlockData();
+            // 2. 아래칸 본체 즉시 설치
+            Block bottomBlock = bottomLoc.getBlock();
+            Material cupboardType = block.getType(); // 타입 저장
+            bottomBlock.setType(cupboardType, false);
+
+            // 데이터 설정
+            org.bukkit.block.data.BlockData data = bottomBlock.getBlockData();
             if (data instanceof org.bukkit.block.data.Bisected bisected) {
-                bisected.setHalf(org.bukkit.block.data.Bisected.Half.TOP);
-                topBlock.setBlockData(bisected, false);
+                bisected.setHalf(org.bukkit.block.data.Bisected.Half.BOTTOM);
+                if (bisected instanceof org.bukkit.block.data.Directional directional) {
+                    directional.setFacing(event.getPlayer().getFacing().getOppositeFace());
+                }
+                bottomBlock.setBlockData(bisected, false);
             }
+
+            // 3. [핵심] 1틱 뒤에 "한 번 더" 강제로 타입을 박아넣음
+            // 엔진이 지웠다면 여기서 다시 살아납니다.
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (bottomLoc.getBlock().getType() == Material.AIR) {
+                    bottomLoc.getBlock().setType(cupboardType, false);
+                    bottomLoc.getBlock().setBlockData(data, false);
+                }
+                bottomLoc.getBlock().getState().update(true, true);
+            }, 1L);
 
             handleProtectorPlace(event, bottomLoc);
-
-            if (event.getPlayer().getGameMode() != org.bukkit.GameMode.CREATIVE) {
-                event.getItemInHand().setAmount(event.getItemInHand().getAmount() - 1);
-            }
         }
-    }
-
-    // [추가] Material의 대체 가능 여부를 판단하는 커스텀 메서드
-    private boolean isReplaceableMaterial(Material material) {
-        // 최신 서버라면 material.isReplaceable() 대신 아래와 같이 체크합니다.
-        return material == Material.AIR ||
-                material == Material.CAVE_AIR ||
-                material == Material.VOID_AIR ||
-                material == Material.VINE ||
-                material == Material.WATER ||
-                material == Material.LAVA;
     }
     // 2. 덫상자 전용 처리 메서드 (수정됨)
     private void handleProtectorPlace(BlockPlaceEvent e, Location loc) {
@@ -333,17 +326,41 @@ public class BlockListener implements Listener {
         return false;
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.LOWEST)
     public void onProtectorInteract(PlayerInteractEvent e) {
         if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         Block b = e.getClickedBlock();
-        if (!isToolCupboard(b)) return;
-
-        String key = "protectors." + plugin.blockToKey(b);
-        // dataStorage 확인
-        if (!plugin.dataStorage.getConfig().contains(key)) return;
+        if (b == null) return;
 
         Player p = e.getPlayer();
+        Block bottomPart = null;
+
+        // [수정] 블록 이름에 따른 정확한 본체 위치 계산
+        String blockName = b.getType().name();
+
+        if (blockName.contains("TOOL_CUPBOARD")) {
+            // 도구함 본체를 직접 클릭한 경우
+            bottomPart = b;
+        } else if (b.getType() == Material.TRAPPED_CHEST) {
+            // 위쪽 상자를 클릭한 경우 -> 아래가 도구함인지 확인
+            Block below = b.getRelative(0, -1, 0);
+            if (below.getType().name().contains("TOOL_CUPBOARD")) {
+                bottomPart = below;
+            }
+        }
+
+        // 도구함 관련 블록이 아니라면 중단
+        if (bottomPart == null) return;
+
+        String key = "protectors." + plugin.blockToKey(bottomPart);
+
+        // [핵심] DB에 데이터가 있는지 확인
+        if (!plugin.dataStorage.getConfig().contains(key)) {
+            p.sendActionBar("§c[오류] 등록되지 않은 도구함입니다. (Y:" + bottomPart.getY() + ")");
+            return;
+        }
+
+        // 권한 부여 로직
         List<String> authUsers = plugin.dataStorage.getConfig().getStringList(key + ".authorized_users");
         String pUUID = p.getUniqueId().toString();
 
@@ -351,16 +368,16 @@ public class BlockListener implements Listener {
             authUsers.add(pUUID);
             plugin.dataStorage.getConfig().set(key + ".authorized_users", authUsers);
             plugin.dataStorage.saveConfig();
-            p.sendActionBar("§a이 도구함의 권한을 획득했습니다!");
+            p.sendActionBar("§a도구함 권한이 승인되었습니다!");
         }
     }
-
-    // 3. 덫상자 파괴 시 아이템 쏟아지기 (추가됨)
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onProtectorBreak(BlockBreakEvent e) {
         Block b = e.getBlock();
-        // Material 이름 이용: EXAMPLEMOD_TOOL_CUPBOARD 체크
-        if (!b.getType().name().contains("TOOL_CUPBOARD") && b.getType() != Material.TRAPPED_CHEST) return;
+
+        // [수정] 여기서 메서드를 호출하세요!
+        // 이제 복잡한 Material 체크 대신 이 메서드 하나로 해결됩니다.
+        if (!isToolCupboard(b)) return;
 
         Location loc = b.getLocation();
         ConfigurationSection protectors = plugin.dataStorage.getConfig().getConfigurationSection("protectors");
@@ -371,13 +388,21 @@ public class BlockListener implements Listener {
             int y = protectors.getInt(key + ".y");
             int z = protectors.getInt(key + ".z");
 
-            // 부서진 블록 좌표가 저장된 도구함 좌표와 일치하는지 확인 (y축은 2칸 높이 고려 +-1)
-            if (loc.getBlockX() == x && loc.getBlockZ() == z && Math.abs(loc.getBlockY() - y) <= 1) {
-                Player p = e.getPlayer();
-                // 권한 체크 후 삭제
+            // Y축은 아래 칸(본체) 기준으로 저장되어 있으므로,
+            // 클릭한 블록이 위칸(상자)일 경우 y-1을 해서 비교해야 합니다.
+            int targetY = (b.getType() == Material.TRAPPED_CHEST) ? loc.getBlockY() - 1 : loc.getBlockY();
+
+            if (loc.getBlockX() == x && loc.getBlockZ() == z && targetY == y) {
+
+                // 파괴 시 반대편 블록 제거 (상자 부수면 아래 삭제 / 아래 부수면 상자 삭제)
+                Block otherPart = b.getType() == Material.TRAPPED_CHEST ? b.getRelative(0, -1, 0) : b.getRelative(0, 1, 0);
+                if (isToolCupboard(otherPart)) {
+                    otherPart.setType(Material.AIR);
+                }
+
                 plugin.dataStorage.getConfig().set("protectors." + key, null);
                 plugin.dataStorage.saveConfig();
-                p.sendActionBar("§e도구함 데이터가 정상적으로 삭제되었습니다.");
+                e.getPlayer().sendActionBar("§e도구함이 파괴되었습니다.");
                 return;
             }
         }
@@ -390,6 +415,34 @@ public class BlockListener implements Listener {
         if (isProtectedLocation(p, loc)) {
             e.setCancelled(true);
             p.sendActionBar("§c자신의 건설차단 구역에서만 가능합니다.");
+        }
+    }
+    @EventHandler
+    public void onOpen(InventoryOpenEvent event) {
+        if (event.getView().getTitle().contains("도구함")) {
+            Player player = (Player) event.getPlayer();
+            Location loc = event.getInventory().getLocation();
+            if (loc == null) return;
+            Location cupboardLoc = loc.clone().subtract(0, 1, 0);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                plugin.blockDecayManager.syncMaintenanceToPlayer(player, cupboardLoc);
+            }, 1L);
+        }
+    }
+    @EventHandler
+    public void onInventoryClick(org.bukkit.event.inventory.InventoryClickEvent event) {
+        if (event.getView().getTitle().contains("도구함")) {
+            Player player = (Player) event.getWhoClicked();
+
+            // 아이템을 옮긴 직후(1틱 뒤)에 다시 계산해서 패킷 전송
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                // 현재 열려있는 인벤토리의 위치 가져오기
+                Location loc = event.getInventory().getLocation();
+                if (loc != null) {
+                    Location cupboardLoc = loc.clone().subtract(0, 1, 0);
+                    plugin.blockDecayManager.syncMaintenanceToPlayer(player, cupboardLoc);
+                }
+            }, 1L);
         }
     }
 }
