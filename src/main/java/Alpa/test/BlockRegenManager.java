@@ -76,7 +76,6 @@ public class BlockRegenManager {
         String key = locationToString(loc); // 형식: world_x_y_z
         pendingConfig.set("pending." + key + ".type", type.name());
         pendingConfig.set("pending." + key + ".time", respawnAt);
-        savePending(); // 여기서 실제로 파일에 씁니다.
         // Bukkit.getLogger().info("데이터 기록됨: " + key); // 디버그용 (확인 후 삭제)
     }
 

@@ -143,4 +143,37 @@ public class GroupManager {
         }
         return null;
     }
+    // GroupManager 클래스 내부에 추가
+    public void addGroupPing(String groupName, float x, float z) {
+        List<String> pings = plugin.getConfig().getStringList("groups." + groupName + ".pings");
+        String newPing = x + "," + z;
+
+        // 중복 체크: 이미 같은 좌표가 있다면 추가하지 않음 (오차범위 0.1 내외)
+        boolean exists = pings.stream().anyMatch(p -> {
+            String[] split = p.split(",");
+            return Math.abs(Float.parseFloat(split[0]) - x) < 0.1 &&
+                    Math.abs(Float.parseFloat(split[1]) - z) < 0.1;
+        });
+
+        if (!exists) {
+            pings.add(newPing);
+            plugin.getConfig().set("groups." + groupName + ".pings", pings);
+            plugin.saveConfig();
+        }
+    }
+    public void removeGroupPing(String groupName, float x, float z) {
+        List<String> pings = plugin.getConfig().getStringList("groups." + groupName + ".pings");
+        pings.removeIf(p -> {
+            String[] split = p.split(",");
+            float px = Float.parseFloat(split[0]);
+            float pz = Float.parseFloat(split[1]);
+            return Math.abs(px - x) < 0.1 && Math.abs(pz - z) < 0.1;
+        });
+        plugin.getConfig().set("groups." + groupName + ".pings", pings);
+        plugin.saveConfig();
+    }
+
+    public List<String> getGroupPings(String groupName) {
+        return plugin.getConfig().getStringList("groups." + groupName + ".pings");
+    }
 }

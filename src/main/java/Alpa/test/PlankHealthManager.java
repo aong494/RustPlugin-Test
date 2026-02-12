@@ -57,7 +57,7 @@ public class PlankHealthManager implements Listener {
     private boolean isTargetBlock(Material material) {
         if (material == null) return false;
         // 1. 터렛 (골드 블록)
-        if (material == Material.GOLD_BLOCK) return true;
+        if (material == Material.TINTED_GLASS) return true;
 
         String name = material.name().toUpperCase();
 
@@ -110,7 +110,7 @@ public class PlankHealthManager implements Listener {
         }else if (isDoor) {
             initialHp = 100;
             displayName = "나무 문";
-        }else if (type == Material.GOLD_BLOCK) {
+        }else if (type == Material.TINTED_GLASS) {
             // 기존 터렛 로직...
             initialHp = plugin.turretConfig.getInt("settings.max_health", 200);
             displayName = plugin.turretConfig.getString("settings.display_name", "자동 터렛");
@@ -182,7 +182,7 @@ public class PlankHealthManager implements Listener {
             } else if (isDoor) {
                 correctName = "나무 문";
                 correctMax = 100;
-            } else if (masterType == Material.GOLD_BLOCK) {
+            } else if (masterType == Material.TINTED_GLASS) {
                 correctName = "자동 터렛";
                 correctMax = 200;
             } else if (masterTypeName.contains("IRON_BLOCK")) {

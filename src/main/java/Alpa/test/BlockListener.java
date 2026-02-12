@@ -196,6 +196,10 @@ public class BlockListener implements Listener {
     public void onPlace(BlockPlaceEvent event) {
         Block block = event.getBlock();
 
+        if (block.getType() == Material.LADDER) {
+            return;
+        }
+
         if (block.getType().name().contains("TOOL_CUPBOARD")) {
             event.setCancelled(true);
 
@@ -439,6 +443,23 @@ public class BlockListener implements Listener {
                 // 현재 열려있는 인벤토리의 위치 가져오기
                 Location loc = event.getInventory().getLocation();
                 if (loc != null) {
+                    Location cupboardLoc = loc.clone().subtract(0, 1, 0);
+                    plugin.blockDecayManager.syncMaintenanceToPlayer(player, cupboardLoc);
+                }
+            }, 1L);
+        }
+    }
+    // 기존 onOpen 메서드 아래에 추가하세요
+    @EventHandler
+    public void onClick(org.bukkit.event.inventory.InventoryClickEvent event) {
+        if (event.getView().getTitle().contains("도구함")) {
+            Player player = (Player) event.getWhoClicked();
+
+            // 클릭 후 인벤토리가 변할 시간을 주기 위해 1틱 뒤 실행
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                Location loc = event.getInventory().getLocation();
+                if (loc != null) {
+                    // 상자 위치의 한 칸 아래가 도구함 본체
                     Location cupboardLoc = loc.clone().subtract(0, 1, 0);
                     plugin.blockDecayManager.syncMaintenanceToPlayer(player, cupboardLoc);
                 }

@@ -131,7 +131,7 @@ public class PlankToIronManager implements Listener {
             if (maxHp == -1) maxHp = IRON_MAX_HP;
             repairMat = Material.IRON_INGOT;
             settingKey = "iron-settings";
-        } else if (b.getType() == Material.GOLD_BLOCK) {
+        } else if (b.getType() == Material.TINTED_GLASS) {
             if (displayName == null) displayName = "자동 터렛";
             if (maxHp == -1) maxHp = IRON_MAX_HP; // 터렛은 철급 체력(200)
             repairMat = Material.IRON_INGOT;
@@ -175,7 +175,7 @@ public class PlankToIronManager implements Listener {
                 plugin.removeLockEntity(master);
 
                 // 터렛 처리
-                if (b.getType() == Material.GOLD_BLOCK) {
+                if (b.getType() == Material.TINTED_GLASS) {
                     plugin.turretManager.removeTurret(b.getLocation());
                     plugin.turretManager.dropTurretItems(b.getLocation());
                 }

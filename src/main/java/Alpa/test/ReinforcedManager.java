@@ -103,20 +103,25 @@ public class ReinforcedManager implements Listener {
     // 기존에 2개였던 BlockPlaceEvent를 이 하나로 통합하세요.
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockPlace(BlockPlaceEvent event) {
+        Player player = event.getPlayer();
+        if (player.isOp()) return;
         Material type = event.getBlock().getType();
         Location loc = event.getBlock().getLocation();
-        Player player = event.getPlayer();
 
         if (isProtected(loc, player)) {
             event.setCancelled(true);
             player.sendMessage("§c[경고] §f이곳은 블록을 설치할 수 없습니다.");
             return; // 여기서 return을 해줘야 아래 로직이 실행되지 않아 메시지가 1번만 뜹니다.
         }
-
         if (type == Material.REINFORCED_DEEPSLATE) {
             protectedLocations.add(loc);
             saveData();
             player.sendMessage("§a[보호] §f이 지역 반경 30블록 내 건축이 보호됩니다.");
+        }
+        else if (type == Material.NETHERITE_BLOCK) {
+            protectedLocations.add(loc);
+            saveData();
+            player.sendMessage("§6[최상위 보호] §f이 지역 반경 200블록 내 건축이 보호됩니다.");
         }
         else if (type == Material.AMETHYST_BLOCK) {
             peaceLocations.add(loc);
@@ -131,19 +136,19 @@ public class ReinforcedManager implements Listener {
         Location loc = event.getBlock().getLocation();
         Player player = event.getPlayer();
 
-        // 1. 자수정 블록이나 강화된 심층암 자체를 부수려 할 때 처리
-        if (type == Material.REINFORCED_DEEPSLATE) {
-            // 본인이 설치한 블록이거나 OP여야만 파괴 가능하도록 하려면 추가 조건 필요
-            // 현재는 누구나 부수면 리스트에서 삭제되는 구조이므로,
-            // 만약 타인의 보호블록 파괴를 막으려면 여기서 isProtected 체크를 먼저 해야 합니다.
+        if (type == Material.REINFORCED_DEEPSLATE || type == Material.NETHERITE_BLOCK) {
+            // 타인이 보호 중인 블록은 부술 수 없도록 체크
             if (isProtected(loc, player)) {
                 event.setCancelled(true);
                 player.sendMessage("§c[경고] §f파괴할 수 없습니다.");
                 return;
             }
+
+            // 본인 것이거나 보호 구역이 아니라면 리스트에서 제거
             if (protectedLocations.remove(loc)) {
                 saveData();
-                player.sendMessage("§c[보호] §f보호 구역이 해제되었습니다.");
+                String name = (type == Material.NETHERITE_BLOCK) ? "최상위 보호" : "보호";
+                player.sendMessage("§c[" + name + "] §f구역이 해제되었습니다.");
             }
         }
         else if (type == Material.AMETHYST_BLOCK) {
@@ -201,15 +206,23 @@ public class ReinforcedManager implements Listener {
     // 수정된 보호 확인 로직 (건축 보호 + 자수정 평화 구역 통합)
     private boolean isProtected(Location targetLoc, Player player) {
         if (player.isOp()) return false;
-
-        // 1. 심층암 보호 구역 체크 (반경 30)
+        // 1. 건축 보호 구역 체크 (심층암 30 / 네더라이트 200)
         for (Location center : protectedLocations) {
             if (!targetLoc.getWorld().equals(center.getWorld())) continue;
+
+            // 설치된 블록의 실제 타입을 확인
+            Material baseBlock = center.getBlock().getType();
+            int radius = 30; // 기본값
+            if (baseBlock == Material.NETHERITE_BLOCK) {
+                radius = 200; // 네더라이트면 200칸으로 확장
+            } else if (baseBlock != Material.REINFORCED_DEEPSLATE) {
+                // 만약 블록이 부서졌는데 데이터만 남은 경우를 대비해 스킵
+                continue;
+            }
             double dx = Math.abs(targetLoc.getX() - center.getX());
             double dz = Math.abs(targetLoc.getZ() - center.getZ());
-            if (dx <= 30 && dz <= 30) return true;
+            if (dx <= radius && dz <= radius) return true;
         }
-
         // 2. 자수정 성역 구역 체크 (반경 200) - 추가된 부분
         for (Location center : peaceLocations) {
             if (!targetLoc.getWorld().equals(center.getWorld())) continue;

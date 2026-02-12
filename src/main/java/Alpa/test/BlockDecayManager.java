@@ -74,65 +74,96 @@ public class BlockDecayManager extends BukkitRunnable {
     @Override
     public void run() {
         ConfigurationSection dataConfig = plugin.dataStorage.getConfig();
-        FileConfiguration mConfig = plugin.maintenanceConfig;
+        ConfigurationSection protectors = dataConfig.getConfigurationSection("protectors");
 
-        Map<Location, Map<Material, Integer>> locationBlockCounts = new HashMap<>();
-        Set<String> unmaintainedPlanks = new HashSet<>();
-        Set<String> unmaintainedDoors = new HashSet<>();
+        if (protectors == null) return;
 
-        // 1. 블록 스캔 (AIR 및 모드 블록 대응)
-        scanSection("planks", dataConfig, locationBlockCounts, unmaintainedPlanks);
-        scanSection("doors", dataConfig, locationBlockCounts, unmaintainedDoors);
+        plugin.getLogger().info("[부식 시스템] 최적화 모드로 검사 시작...");
 
-        Map<Location, Set<String>> locationMissingItems = new HashMap<>();
-
-        // 2. 도구함별 자원 차감
-        for (Map.Entry<Location, Map<Material, Integer>> entry : locationBlockCounts.entrySet()) {
-            Location cupLoc = entry.getKey();
-            Map<Material, Integer> counts = entry.getValue();
-
-            Inventory inv = getInventoryAt(cupLoc);
-            System.out.println("[디버그] 위치: " + cupLoc.getBlockX() + ", " + cupLoc.getBlockY() + ", " + cupLoc.getBlockZ());
-            System.out.println("[디버그] 도구함 인벤토리 감지 결과: " + (inv == null ? "실패" : "성공 (" + inv.getSize() + "칸)"));
-
-            if (inv != null) {
-                boolean allMaintained = true;
-                for (Map.Entry<Material, Integer> countEntry : counts.entrySet()) {
-                    Material blockType = countEntry.getKey();
-                    int count = countEntry.getValue();
-
-                    String typeName = getSettingKey(blockType);
-                    String path = "costs." + typeName;
-
-                    if (!mConfig.contains(path)) continue;
-
-                    Material costItem = Material.valueOf(mConfig.getString(path + ".item"));
-                    int perAmount = mConfig.getInt(path + ".amount", 10);
-                    int costQty = mConfig.getInt(path + ".cost", 1);
-                    int totalRequired = (int) Math.ceil((double) count / perAmount) * costQty;
-
-                    if (inv.contains(costItem, totalRequired)) {
-                        removeItemFromInventory(inv, costItem, totalRequired);
-                    } else {
-                        allMaintained = false;
-                        locationMissingItems.computeIfAbsent(cupLoc, k -> new HashSet<>()).add(getItemKoreanName(costItem));
-                        markAsUnmaintainedAtLocation(cupLoc, unmaintainedPlanks, unmaintainedDoors, dataConfig);
-                    }
-                }
-                updateStatusAtLocation(cupLoc, locationMissingItems.get(cupLoc));
-            } else {
-                markAsUnmaintainedAtLocation(cupLoc, unmaintainedPlanks, unmaintainedDoors, dataConfig);
-            }
+        // 1. 모든 도구함 위치를 먼저 리스트에 담기 (연산 속도 향상)
+        List<Location> cupLocs = new ArrayList<>();
+        for (String key : protectors.getKeys(false)) {
+            cupLocs.add(plugin.keyToLocation(key)); // key를 Location으로 변환하는 메서드 활용
         }
 
-        // 3. 체력 감소 적용
+        // 2. 관리대상 블록(planks, doors)을 도구함별로 분류
+        // Map<도구함위치, 해당도구함이 보호하는 블록키 리스트>
+        Map<Location, List<String>> protectedPlanks = new HashMap<>();
+        Map<Location, List<String>> protectedDoors = new HashMap<>();
+
+        // 보호받지 못하는 '유령' 블록들을 따로 관리
+        Set<String> unmaintainedPlanks = new HashSet<>(dataConfig.getConfigurationSection("planks").getKeys(false));
+        Set<String> unmaintainedDoors = new HashSet<>(dataConfig.getConfigurationSection("doors").getKeys(false));
+
+        int radius = plugin.maintenanceConfig.getInt("settings.radius", 15);
+
+        // 3. 도구함을 기준으로 반경 내 블록 찾기 (이게 훨씬 빠릅니다)
+        for (Location cupLoc : cupLocs) {
+            // planks 섹션 검사
+            checkProtection(dataConfig.getConfigurationSection("planks"), cupLoc, radius, unmaintainedPlanks);
+            // doors 섹션 검사
+            checkProtection(dataConfig.getConfigurationSection("doors"), cupLoc, radius, unmaintainedDoors);
+
+            // 4. 여기서 해당 도구함(cupLoc)의 인벤토리를 한 번만 열어 자원 차감
+            handleMaintenanceDeduction(cupLoc, dataConfig);
+        }
+
+        // 5. 보호받지 못하는 블록들(unmaintained)에 대해서만 체력 감소 적용
         applyDecay(unmaintainedPlanks, "planks");
         applyDecay(unmaintainedDoors, "doors");
 
+        // 6. 마지막에 딱 한 번만 저장
         plugin.dataStorage.saveConfig();
+        plugin.getLogger().info("[부식 시스템] 검사 완료.");
     }
-    // BlockDecayManager 클래스 내부에 추가/수정
 
+    // 특정 도구함 주변에 블록이 있는지 확인하고 unmaintained 목록에서 제거하는 헬퍼
+    private void checkProtection(ConfigurationSection section, Location cupLoc, int radius, Set<String> unmaintainedSet) {
+        if (section == null) return;
+
+        // 주의: 여기서도 전체를 돌면 느려질 수 있으므로,
+        // 나중에는 구역별(Chunk)로 데이터를 나누어 저장하는 것이 더 좋습니다.
+        Iterator<String> it = unmaintainedSet.iterator();
+        while (it.hasNext()) {
+            String blockKey = it.next();
+            if (isBlockInRadius(blockKey, cupLoc, radius)) {
+                it.remove(); // 보호받고 있으므로 부식 대상에서 제외
+            }
+        }
+    }
+    private void handleMaintenanceDeduction(Location cupLoc, ConfigurationSection dataConfig) {
+        FileConfiguration mConfig = plugin.maintenanceConfig;
+        Inventory inv = getInventoryAt(cupLoc); // 기존에 구현하신 메서드 활용
+
+        // 1. 해당 도구함 영향권 내 블록 수 계산
+        Map<Material, Integer> counts = new HashMap<>();
+        int radius = mConfig.getInt("settings.radius", 15);
+
+        countBlocksForCupboard(dataConfig.getConfigurationSection("planks"), cupLoc, radius, counts);
+        countBlocksForCupboard(dataConfig.getConfigurationSection("doors"), cupLoc, radius, counts);
+
+        if (inv == null) return;
+
+        // 2. 자원 차감 루프
+        for (Map.Entry<Material, Integer> entry : counts.entrySet()) {
+            String typeName = getSettingKey(entry.getKey());
+            String path = "costs." + typeName;
+
+            if (!mConfig.contains(path)) continue;
+
+            Material costItem = Material.valueOf(mConfig.getString(path + ".item"));
+            int perAmount = mConfig.getInt(path + ".amount", 10);
+            int costQty = mConfig.getInt(path + ".cost", 1);
+
+            // 필요한 총 개수 계산
+            int totalRequired = (int) Math.ceil((double) entry.getValue() / perAmount) * costQty;
+
+            // 자원이 충분하면 차감
+            if (countItemInInventory(inv, costItem) >= totalRequired) {
+                removeItemFromInventory(inv, costItem, totalRequired);
+            }
+        }
+    }
     public void syncMaintenanceToPlayer(Player player, Location cupLoc) {
         ConfigurationSection dataConfig = plugin.dataStorage.getConfig();
         FileConfiguration mConfig = plugin.maintenanceConfig;
@@ -218,13 +249,6 @@ public class BlockDecayManager extends BukkitRunnable {
         if (above2.getType() == Material.TRAPPED_CHEST) {
             if (above2.getState() instanceof org.bukkit.block.Chest chest) return chest.getInventory();
         }
-
-        // [디버그] 그래도 못 찾았다면 주변 블록 상태 출력
-        System.out.println("[디버그] 상자 감지 실패! 위치: " + loc.getBlockX() + ", " + loc.getBlockY() + ", " + loc.getBlockZ());
-        System.out.println("  - 현재(Y): " + current.getType());
-        System.out.println("  - 위(Y+1): " + above.getType());
-        System.out.println("  - 위위(Y+2): " + above2.getType());
-
         return null;
     }
     private void updateStatusAtLocation(Location loc, Set<String> missing) {
@@ -277,7 +301,6 @@ public class BlockDecayManager extends BukkitRunnable {
                     String cupKey = plugin.blockToKey(actualBlock);
                     plugin.dataStorage.getConfig().set("protectors." + cupKey, null);
                     plugin.dataStorage.saveConfig();
-                    System.out.println("[디버그] 존재하지 않는 도구함 데이터 삭제됨: " + cupKey);
 
                     unmaintained.add(key); // 보호받지 못하는 블록으로 처리
                     continue;

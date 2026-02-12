@@ -16,6 +16,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.event.Event;
+import org.bukkit.util.RayTraceResult;
 
 import java.util.*;
 
@@ -49,58 +50,70 @@ public class BlueprintManager implements Listener {
     }
 
     public void updateHologram(Player player, Material material) {
+        // 1. 플레이어 위치와 시선 방향 가져오기
+        Location eyeLoc = player.getEyeLocation();
+        org.bukkit.util.Vector direction = eyeLoc.getDirection(); // player.getDirection() 대신 사용
 
-        Block targetBlock = player.getTargetBlockExact(5);
-        if (targetBlock == null) {
+        // 2. 레이트레이스 실행 (최대 5칸)
+        RayTraceResult rayTrace = player.getWorld().rayTraceBlocks(eyeLoc, direction, 5);
+
+        // 결과가 없거나 블록에 맞지 않았으면 초기화
+        if (rayTrace == null || rayTrace.getHitBlock() == null) {
             clearHologram(player);
             return;
         }
 
-        // 설치될 기준 위치 (바라보는 블록의 윗칸)
-        Location baseLoc = targetBlock.getLocation().add(0, 1, 0);
+        // 3. 맞은 블록과 면(Face) 정보 가져오기
+        Block targetBlock = rayTrace.getHitBlock();
+        BlockFace face = rayTrace.getHitBlockFace();
+
+        // 4. 설치될 기준 위치 계산 (바라보는 면의 앞칸)
+        Location baseLoc = targetBlock.getRelative(face).getLocation();
+
+        // 중복 계산 방지
         if (baseLoc.equals(lastBaseLoc.get(player.getUniqueId()))) return;
         clearHologram(player);
         lastBaseLoc.put(player.getUniqueId(), baseLoc);
 
-        ItemStack hand = player.getInventory().getItemInMainHand();
-        String fullItemName = (hand != null) ? hand.toString().toLowerCase() : "";
-        boolean isCupboard = fullItemName.contains("tool_cupboard");
-
+        // --- 이후 로직 (width, height 계산 및 소환) ---
         String name = material.name().toUpperCase();
         int width = name.contains("BIG_DOOR") ? 4 : 1;
-        int height = 1;
-        if (name.contains("BIG_DOOR")) {
-            height = 4;
-        } else if (name.contains("DOOR") || isCupboard) {
-            height = 2; // 도구함일 때 여기서 2칸으로 설정됩니다.
+        int height = (name.contains("DOOR") || name.contains("CUPBOARD")) ? 2 : 1;
+        if (name.contains("BIG_DOOR")) height = 4;
+
+        // 천장 설치 시 보정
+        if (face == BlockFace.DOWN && height > 1) {
+            baseLoc.add(0, -(height - 1), 0);
         }
 
-        // 홀로그램이 차지할 모든 좌표 리스트
         List<Location> locs = getStructureLocations(baseLoc, player.getFacing(), width, height);
 
-        // [핵심] 모든 위치를 검사하여 하나라도 블록과 겹치면 빨간색으로 결정
         boolean canBuild = canBuildHere(player, locs, material);
         Material ghostMat = canBuild ? Material.CYAN_STAINED_GLASS : Material.RED_STAINED_GLASS;
 
+        // 1. 이번에 생성할 엔티티들을 담을 임시 리스트 생성
         List<BlockDisplay> entities = new ArrayList<>();
+
         for (Location loc : locs) {
-            BlockDisplay display = loc.getWorld().spawn(loc, BlockDisplay.class, (ent) -> {
+            BlockDisplay display = loc.getWorld().spawn(loc, org.bukkit.entity.BlockDisplay.class, (ent) -> {
                 ent.setBlock(Bukkit.createBlockData(ghostMat));
                 ent.setPersistent(false);
                 ent.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15));
-                for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
-                    if (!onlinePlayer.equals(player)) {
-                        onlinePlayer.hideEntity(plugin, ent);
-                    }
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    if (!p.equals(player)) p.hideEntity(plugin, ent);
                 }
             });
 
+            // 2. 생성된 엔티티를 리스트에 추가
             entities.add(display);
         }
+
+        // 3. [핵심] activeEntities 맵에 플레이어 UUID와 함께 저장
         activeEntities.put(player.getUniqueId(), entities);
     }
     // 설치 가능 여부 판단 메서드
     public boolean canBuildHere(Player player, List<Location> locations, Material material) {
+        if (player.isOp()) return true;
         for (Location loc : locations) {
             // 1. 블록 겹침 체크: 공기가 아니거나 교체 가능한 블록(풀 등)이 아니면 겹친 것으로 판단
             Block block = loc.getBlock();
@@ -158,24 +171,25 @@ public class BlueprintManager implements Listener {
     }
 
     // 방향에 따른 4x4 또는 1x2 좌표 리스트 생성
-    private List<Location> getStructureLocations(Location start, BlockFace facing, int w, int h) {
+    private List<Location> getStructureLocations(Location start, BlockFace playerFacing, int w, int h) {
         List<Location> locs = new ArrayList<>();
 
-        // 플레이어가 바라보는 방향에 대해 '왼쪽'으로 펼쳐질지 '오른쪽'으로 펼쳐질지 결정합니다.
-        // 만약 현재 오른쪽으로 펼쳐지는데 모드는 왼쪽이라면, 반대로 설정하세요.
+        // 플레이어의 시선 방향에 따라 '오른쪽'이 어디인지 계산
         BlockFace sideStep;
-        switch (facing) {
-            case NORTH: sideStep = BlockFace.WEST; break;
-            case SOUTH: sideStep = BlockFace.EAST; break;
-            case EAST:  sideStep = BlockFace.NORTH; break;
-            case WEST:  sideStep = BlockFace.SOUTH; break;
+        switch (playerFacing) {
+            case NORTH: sideStep = BlockFace.EAST; break;
+            case SOUTH: sideStep = BlockFace.WEST; break;
+            case EAST:  sideStep = BlockFace.SOUTH; break;
+            case WEST:  sideStep = BlockFace.NORTH; break;
             default:    sideStep = BlockFace.EAST;
         }
 
         for (int x = 0; x < w; x++) {
             for (int y = 0; y < h; y++) {
-                // sideStep 방향으로 x만큼, 위로 y만큼 이동하며 좌표 계산
-                locs.add(start.clone().add(sideStep.getModX() * x, y, sideStep.getModZ() * x));
+                // baseLoc에서 위로 y칸, 플레이어 기준 오른쪽으로 x칸 확장
+                Location l = start.clone().add(0, y, 0);
+                l.add(sideStep.getModX() * x, 0, sideStep.getModZ() * x);
+                locs.add(l);
             }
         }
         return locs;

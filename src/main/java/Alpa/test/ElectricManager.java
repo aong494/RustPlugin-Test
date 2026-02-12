@@ -484,7 +484,7 @@ public class ElectricManager implements Listener {
 
         // 2. 기본 발전기 체크
         Material m = b.getType();
-        if (m == Material.GOLD_BLOCK) return CompType.TURRET;
+        if (m == Material.TINTED_GLASS) return CompType.TURRET;
         if (m == Material.DAYLIGHT_DETECTOR || m == Material.EMERALD_BLOCK ||
                 m == Material.FURNACE || m == Material.BLAST_FURNACE) return CompType.GENERATOR;
 

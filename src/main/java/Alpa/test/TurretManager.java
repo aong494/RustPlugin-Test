@@ -119,14 +119,12 @@ public class TurretManager implements Listener {
 
     @EventHandler
     public void onPlace(BlockPlaceEvent e) {
-        if (e.getBlock().getType() == Material.GOLD_BLOCK) {
+        if (e.getBlock().getType() == Material.TINTED_GLASS) {
             Location loc = e.getBlock().getLocation();
             String key = locToKey(loc);
 
-            // 1. 소유자 저장
             blockConfig.set(key + ".owner", e.getPlayer().getUniqueId().toString());
 
-            // 2. 상부 모델 소환 (CustomModelData 2)
             ItemStack turretTop = new ItemStack(Material.PAPER);
             ItemMeta meta = turretTop.getItemMeta();
             if (meta != null) {
@@ -134,13 +132,14 @@ public class TurretManager implements Listener {
                 turretTop.setItemMeta(meta);
             }
 
-            Location modelLoc = loc.clone().add(0.5, 0.5, 0.5); // 블록 중앙
+            Location modelLoc = loc.clone().add(0.5, 0.5, 0.5);
             ItemDisplay display = loc.getWorld().spawn(modelLoc, ItemDisplay.class, ent -> {
                 ent.setItemStack(turretTop);
                 ent.setBrightness(new Display.Brightness(15, 15));
+                ent.setInvulnerable(true);
+                ent.setPersistent(true);
             });
 
-            // 3. 파일에 엔티티 UUID 저장 (재부팅 대비)
             blockConfig.set(key + ".model_uuid", display.getUniqueId().toString());
             saveBlocks();
 
@@ -151,35 +150,17 @@ public class TurretManager implements Listener {
 
     @EventHandler
     public void onBreak(BlockBreakEvent e) {
-        if (e.getBlock().getType() == Material.GOLD_BLOCK) {
-            Location loc = e.getBlock().getLocation();
-
-            // 1. 맵에서 엔티티를 찾아 즉시 제거
-            ItemDisplay model = turretModels.get(loc);
-            if (model != null) {
-                model.remove();
-                turretModels.remove(loc);
-            } else {
-                // 만약 맵에 없다면 (재부팅 후 로드 실패 등), 근처의 ItemDisplay를 뒤져서 제거 (안전장치)
-                loc.getWorld().getNearbyEntities(loc.add(0.5, 0.5, 0.5), 1.0, 1.0, 1.0).forEach(entity -> {
-                    if (entity instanceof ItemDisplay) {
-                        // CustomModelData가 2번인 것만 골라서 삭제
-                        ItemStack item = ((ItemDisplay) entity).getItemStack();
-                        if (item != null && item.hasItemMeta() && item.getItemMeta().getCustomModelData() == 2) {
-                            entity.remove();
-                        }
-                    }
-                });
-            }
-
-            // 2. 아이템 드롭 및 데이터 삭제 호출
-            dropTurretItems(loc);
+        // 터렛 하단 블록(TINTED_GLASS)을 부수려고 할 때
+        if (e.getBlock().getType() == Material.TINTED_GLASS) {
+            Player p = e.getPlayer();
+            e.setCancelled(true);
+            plugin.applyPlankDmg(e.getBlock(), 1, p);
         }
     }
 
     @EventHandler
     public void onInteract(PlayerInteractEvent e) {
-        if (e.getAction() == Action.RIGHT_CLICK_BLOCK && e.getClickedBlock().getType() == Material.GOLD_BLOCK) {
+        if (e.getAction() == Action.RIGHT_CLICK_BLOCK && e.getClickedBlock().getType() == Material.TINTED_GLASS) {
             if (e.getPlayer().getInventory().getItemInMainHand().getType() == Material.STICK) {
                 return;
             }
@@ -411,5 +392,20 @@ public class TurretManager implements Listener {
         activeInvs.remove(loc);
         lastTargetedTicks.remove(loc);
         lastFireTicks.remove(loc);
+    }
+
+    // 또는 아래 범용 리스너를 TurretManager 클래스에 추가
+    @EventHandler
+    public void onTurretModelDamage(org.bukkit.event.entity.EntityDamageEvent e) {
+        // 1. 데미지를 입은 엔티티가 ItemDisplay인지 확인
+        if (e.getEntity() instanceof ItemDisplay display) {
+            ItemStack item = display.getItemStack();
+
+            // 2. 우리가 설정한 터렛 모델(CustomModelData 2번)인지 확인
+            if (item != null && item.hasItemMeta() && item.getItemMeta().getCustomModelData() == 2) {
+                // 3. 데미지 이벤트 취소 (때려도 반응 없음)
+                e.setCancelled(true);
+            }
+        }
     }
 }

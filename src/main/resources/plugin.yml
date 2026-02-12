@@ -27,3 +27,6 @@ commands:
   스포너설정:
     description: "새로운 필드 몹 스포너를 설정합니다."
     permission: op
+  카드키:
+    description: 카드키 시스템 관리 명령어
+    usage: /카드키 [설정/연결]

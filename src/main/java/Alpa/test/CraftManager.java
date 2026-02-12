@@ -1,5 +1,7 @@
 package Alpa.test;
 
+import com.google.common.io.ByteArrayDataOutput;
+import com.google.common.io.ByteStreams;
 import org.bukkit.*;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
@@ -8,6 +10,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -21,17 +24,27 @@ import java.util.*;
 public class CraftManager implements Listener {
 
     private final main plugin;
-    private final String MAIN_TITLE = "§0제작 메뉴";
-    private final String TOOL_TITLE = "§0제작 - 도구";
-    private final String CONSTRUCT_TITLE = "§0제작 - 건축";
-    private final String CONSUMABLE_TITLE = "§0제작 - 소모템";
-    private final String LV1_TITLE = "§0제작 - 1레벨 작업대";
-    private final String LV2_TITLE = "§0제작 - 2레벨 작업대";
-    private final String LV3_TITLE = "§0제작 - 3레벨 작업대";
+
+    // --- 카테고리 식별자 ---
+    private final String CAT_TOOLS = "tools";
+    private final String CAT_CONSTRUCT = "construct";
+    private final String CAT_CONSUMABLES = "consumables";
+    private final String CAT_LV1 = "lv1";
+    private final String CAT_LV2 = "lv2";
+    private final String CAT_LV3 = "lv3";
+
+    // --- GUI 제목 (하나로 통합) ---
+    private final String GUI_TITLE_PREFIX = "§0제작 시스템";
     private final String REG_STEP1_TITLE = "§1[1단계] 아이템 등록 (8번 결과물)";
     private final String REG_STEP2_TITLE = "§1[2단계] 제작 시간 설정";
 
-    // 데이터 보존을 위한 임시 저장소
+    // --- 플레이어별 상태 저장소 ---
+    private final Map<UUID, String> playerCurrentCategory = new HashMap<>(); // 현재 보고 있는 탭
+    private final Map<UUID, Integer> playerCraftAmount = new HashMap<>();    // 현재 설정한 수량
+    private final Map<UUID, ItemStack> playerSelectedRecipe = new HashMap<>(); // 현재 선택한 레시피 결과물
+    private final Map<UUID, String> playerSelectedPath = new HashMap<>();      // 선택한 레시피의 Config 경로 (제작용)
+
+    // --- 기존 데이터 저장소 ---
     private final Map<UUID, ItemStack> pendingResult = new HashMap<>();
     private final Map<UUID, List<ItemStack>> pendingIngredients = new HashMap<>();
     private final Map<UUID, Integer> pendingTime = new HashMap<>();
@@ -39,11 +52,11 @@ public class CraftManager implements Listener {
 
     public CraftManager(main plugin) {
         this.plugin = plugin;
-        startUpdateTask(); // 제작 진행 스케줄러 시작
+        startUpdateTask();
         startFurnaceParticleTask();
     }
 
-    // 제작 대기열 관리 객체
+    // 제작 대기열 객체
     private static class CraftingTask {
         ItemStack result;
         int remainingTime;
@@ -87,208 +100,418 @@ public class CraftManager implements Listener {
         };
     }
 
-    // --- GUI 열기 메서드 ---
+    // --- [1] GUI 열기 및 네비게이션 ---
 
-    public void openMainMenu(Player player) {
-        Inventory inv = Bukkit.createInventory(null, 9, MAIN_TITLE);
-        inv.setItem(2, createItem(Material.DIAMOND_PICKAXE, "§e[도구]", "§f도구 제작창을 엽니다."));
-        inv.setItem(4, createItem(Material.BRICKS, "§e[건축]", "§f건축 자재 제작창을 엽니다."));
-        inv.setItem(6, createItem(Material.COOKED_BEEF, "§e[소모템]", "§f소모품 제작창을 엽니다."));
-        player.openInventory(inv);
+    // 명령어(/제작) 진입점 수정
+    public void openDefaultCrafting(Player player) {
+        UUID uuid = player.getUniqueId();
+        playerCurrentCategory.put(uuid, CAT_TOOLS);
+        playerCraftAmount.put(uuid, 1); // 기본값 1
+        playerSelectedRecipe.remove(uuid);
+        syncAmountToMod(player, 1);
+        openCraftingGUI(player);
     }
 
-    public void openLeveledMainMenu(Player player, int level) {
-        // 블록 전용임을 구분하기 위해 타이틀에 레벨 정보를 살짝 숨기거나 태그를 달 수 있습니다.
-        Inventory inv = Bukkit.createInventory(null, 18, "§0제작 메뉴 (Lv." + level + ")");
+    // GUI 렌더링 로직 수정
+    private void openCraftingGUI(Player player) {
+        UUID uuid = player.getUniqueId();
+        String currentCategory = playerCurrentCategory.getOrDefault(uuid, CAT_TOOLS);
+        int amount = playerCraftAmount.getOrDefault(uuid, 1);
+        int workbenchLevel = getNearbyWorkbenchLevel(player); // 주변 작업대 체크
 
-        // 첫 번째 줄: 기본 메뉴 (기존과 동일)
-        inv.setItem(2, createItem(Material.DIAMOND_PICKAXE, "§e[도구]", "§f도구 제작창을 엽니다."));
-        inv.setItem(4, createItem(Material.BRICKS, "§e[건축]", "§f건축 자재 제작창을 엽니다."));
-        inv.setItem(6, createItem(Material.COOKED_BEEF, "§e[소모템]", "§f소모품 제작창을 엽니다."));
+        Inventory inv = Bukkit.createInventory(null, 54, GUI_TITLE_PREFIX);
 
-        // 두 번째 줄: 작업대 레벨별 버튼 (슬롯 9~17)
-        if (level >= 1) {
-            inv.setItem(11, createItem(Material.IRON_INGOT, "§7[1레벨 작업대]", "§f기초 부품을 제작합니다."));
-        }
-        if (level >= 2) {
-            inv.setItem(13, createItem(Material.GOLD_INGOT, "§6[2레벨 작업대]", "§f중급 장비를 제작합니다."));
-        }
-        if (level >= 3) {
-            inv.setItem(15, createItem(Material.NETHERITE_INGOT, "§b[3레벨 작업대]", "§f최첨단 기술을 사용합니다."));
-        }
+        loadRecipesToGUI(inv, currentCategory);
+        updateBottomArea(player, inv);
 
         player.openInventory(inv);
     }
 
-    public void openCategoryMenu(Player player, String title, String configPath) {
-        Inventory inv = Bukkit.createInventory(null, 54, title);
-        ConfigurationSection categorySection = plugin.getConfig().getConfigurationSection("recipes." + configPath);
+    // 하단 영역(45~53)만 업데이트하는 메서드 (깜빡임 방지용)
+    private void updateBottomArea(Player player, Inventory inv) {
+        UUID uuid = player.getUniqueId();
 
-        if (categorySection != null) {
-            for (String slotKey : categorySection.getKeys(false)) {
-                try {
-                    int slot = Integer.parseInt(slotKey);
-                    ConfigurationSection slotSection = categorySection.getConfigurationSection(slotKey);
-
-                    if (slotSection != null && slot < 45) {
-                        // 슬롯 하위에 랜덤 ID가 하나라도 있는지 확인
-                        Set<String> recipeIds = slotSection.getKeys(false);
-                        if (!recipeIds.isEmpty()) {
-                            String firstId = recipeIds.iterator().next();
-                            ItemStack result = slotSection.getItemStack(firstId + ".result");
-                            if (result != null) {
-                                inv.setItem(slot, result);
-                            }
-                        }
-                    }
-                } catch (NumberFormatException ignored) {}
+        // 4-1. 대기열 표시 (Slot 45~50, 6칸)
+        List<CraftingTask> queue = craftingQueues.getOrDefault(uuid, new ArrayList<>());
+        for (int i = 0; i < 6; i++) {
+            int slot = 45 + i;
+            if (i < queue.size()) {
+                CraftingTask task = queue.get(i);
+                ItemStack item = task.result.clone();
+                ItemMeta meta = item.getItemMeta();
+                List<String> lore = (meta != null && meta.hasLore()) ? meta.getLore() : new ArrayList<>();
+                lore.add("§8----------------");
+                lore.add(i == 0 ? "§e▶ 제작 중: " + task.remainingTime + "초" : "§7대기 중: " + task.remainingTime + "초");
+                if (meta != null) { meta.setLore(lore); item.setItemMeta(meta); }
+                inv.setItem(slot, item);
             }
         }
-        updateQueueDisplay(player, inv);
-        player.openInventory(inv);
+
+        // 4-2. 선택된 아이템 미리보기 (Slot 52)
+        ItemStack selected = playerSelectedRecipe.get(uuid);
+        if (selected != null) {
+            ItemStack preview = selected.clone();
+            ItemMeta meta = preview.getItemMeta();
+            if (meta != null) {
+                meta.setDisplayName("§e[선택됨] §f" + getItemNameKorean(selected));
+                preview.setItemMeta(meta);
+            }
+            inv.setItem(51, preview);
+        } else {
+            inv.setItem(51, createItem(Material.BARRIER, "§c선택 없음", "§7목록에서 제작할 아이템을\n§7클릭하세요."));
+        }
     }
+
+    // --- [2] 이벤트 핸들러 ---
+
+    @EventHandler
+    public void onPlayerSwapHand(PlayerSwapHandItemsEvent e) {
+        e.setCancelled(true);
+        openDefaultCrafting(e.getPlayer());
+        e.getPlayer().playSound(e.getPlayer().getLocation(), Sound.BLOCK_WOODEN_TRAPDOOR_OPEN, 0.5f, 1.5f);
+    }
+
+    @EventHandler
+    public void onInventoryClick(InventoryClickEvent e) {
+        String title = e.getView().getTitle();
+        if (!title.startsWith("§0제작 시스템")) {
+            handleRegistrationClick(e); // 등록 메뉴 처리로 넘김
+            return;
+        }
+
+        e.setCancelled(true);
+        Player player = (Player) e.getWhoClicked();
+        Inventory inv = e.getClickedInventory();
+        if (inv == null || inv != e.getView().getTopInventory()) return;
+
+        int slot = e.getRawSlot();
+        UUID uuid = player.getUniqueId();
+
+        // 1. 상단 탭 클릭 (Slot 0~5)
+        if (slot >= 0 && slot <= 5) {
+            int workbenchLevel = getNearbyWorkbenchLevel(player);
+
+            // 클릭한 슬롯의 요구 레벨 체크
+            boolean canAccess = true;
+            if (slot == 3 && workbenchLevel < 1) canAccess = false;
+            if (slot == 4 && workbenchLevel < 2) canAccess = false;
+            if (slot == 5 && workbenchLevel < 3) canAccess = false;
+
+            if (!canAccess) {
+                player.sendMessage("§c[System] 해당 작업대 근처에서만 이용 가능합니다.");
+                player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 0.5f, 1f);
+                return;
+            }
+
+            String newCategory = getCategoryBySlot(slot);
+            if (newCategory != null) {
+                playerCurrentCategory.put(uuid, newCategory);
+                playerSelectedRecipe.remove(uuid);
+                player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 1.5f);
+                openCraftingGUI(player);
+            }
+        }
+        // 2. 수량 조절 (Slot 6, 8)
+        else if (slot == 6 || slot == 8) {
+            int current = playerCraftAmount.getOrDefault(uuid, 1);
+            if (slot == 6) current = Math.max(1, current - 1);
+            if (slot == 8) current = Math.min(64, current + 1);
+
+            playerCraftAmount.put(uuid, current);
+            syncAmountToMod(player, current);
+            player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.8f, 2f);
+
+            updateBottomArea(player, inv);
+        }
+        // 3. 레시피 아이템 선택 (Slot 9~44)
+        else if (slot >= 9 && slot <= 44) {
+            ItemStack clicked = e.getCurrentItem();
+            if (clicked != null && clicked.getType() != Material.AIR) {
+                // 관리자 모드: Shift+우클릭 (등록), Shift+좌클릭 (삭제)
+                if (player.isOp() && e.getClick().isShiftClick()) {
+                    handleAdminAction(player, slot, clicked);
+                    return;
+                }
+
+                // 일반 유저: 아이템 선택
+                playerSelectedRecipe.put(uuid, clicked); // 결과물 저장 (미리보기용)
+
+                // Config 경로 찾기 (실제 제작용) - 아이템에 숨겨진 키나 메타데이터가 없으므로 Config를 역추적
+                String currentCat = playerCurrentCategory.get(uuid);
+                String foundPath = findRecipePath(clicked, currentCat);
+                if (foundPath != null) {
+                    playerSelectedPath.put(uuid, foundPath);
+                }
+
+                player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 1f);
+                updateBottomArea(player, inv); // 선택된 아이템 표시 및 버튼 활성화
+            }
+        }
+        // 4. 제작 실행 버튼 (Slot 52)
+        else if (slot == 52) {
+            ItemStack selected = playerSelectedRecipe.get(uuid);
+            String path = playerSelectedPath.get(uuid);
+
+            if (selected != null && path != null) {
+                int amount = playerCraftAmount.getOrDefault(uuid, 1);
+                tryStartCrafting(player, selected, path, amount);
+            } else {
+                player.sendMessage("§c[System] 아이템을 먼저 선택해주세요.");
+            }
+        }
+    }
+
+    // --- [3] 제작 로직 ---
+
+    private void tryStartCrafting(Player player, ItemStack result, String recipePath, int multiplier) {
+        String category = playerCurrentCategory.get(player.getUniqueId());
+        // path 구조: recipes.category.slot.uuid
+        // recipePath는 "category.slot.uuid" 형태라고 가정하지 않고, findRecipePath가 반환한 값 사용
+
+        ConfigurationSection sec = plugin.getConfig().getConfigurationSection(recipePath);
+        if (sec == null) {
+            player.sendMessage("§c[System] 레시피 정보를 찾을 수 없습니다.");
+            return;
+        }
+
+        List<ItemStack> ingredients = (List<ItemStack>) sec.getList("ingredients");
+        int baseTime = sec.getInt("time", 10);
+        int totalTime = baseTime * multiplier; // (선택 사항) 시간도 배수로 늘릴지 여부. 여기선 늘림.
+
+        // 필요 재료 계산 (기본 재료 * 배수)
+        List<ItemStack> totalIngredients = new ArrayList<>();
+        if (ingredients != null) {
+            for (ItemStack ing : ingredients) {
+                ItemStack clone = ing.clone();
+                clone.setAmount(ing.getAmount() * multiplier);
+                totalIngredients.add(clone);
+            }
+        }
+
+        if (hasIngredients(player, totalIngredients)) {
+            // 결과물 수량 계산
+            ItemStack finalResult = result.clone();
+            finalResult.setAmount(result.getAmount() * multiplier);
+
+            startCraftingProcess(player, finalResult, totalIngredients, totalTime);
+        } else {
+            sendMissingIngredientsMessage(player, totalIngredients);
+        }
+    }
+
+    private void startCraftingProcess(Player player, ItemStack result, List<ItemStack> ingredients, int time) {
+        List<CraftingTask> queue = craftingQueues.computeIfAbsent(player.getUniqueId(), k -> new ArrayList<>());
+
+        // 대기열 7칸 제한
+        if (queue.size() >= 7) {
+            player.sendMessage("§c[System] 제작 대기열이 가득 찼습니다.");
+            return;
+        }
+
+        removeIngredients(player, ingredients);
+        queue.add(new CraftingTask(result, time));
+
+        player.sendMessage("§e[System] 제작을 시작합니다. (" + getItemNameKorean(result) + " x" + result.getAmount() + ")");
+        player.playSound(player.getLocation(), Sound.BLOCK_ANVIL_USE, 0.5f, 1.5f);
+
+        // GUI 갱신 (보고 있다면)
+        if (player.getOpenInventory().getTitle().startsWith("§0제작 시스템")) {
+            updateBottomArea(player, player.getOpenInventory().getTopInventory());
+        }
+    }
+
+    // --- [4] 유틸리티 및 내부 로직 ---
+
+    // 카테고리 탭 아이콘 생성 (선택된 탭은 인챈트 효과)
+    private ItemStack createTabItem(Material mat, String name, String catKey, String currentCat) {
+        ItemStack item = createItem(mat, "§f" + name, "§7클릭하여 카테고리를 이동합니다.");
+        if (catKey.equals(currentCat)) {
+            ItemMeta meta = item.getItemMeta();
+            meta.addEnchant(org.bukkit.enchantments.Enchantment.DURABILITY, 1, true);
+            meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+            meta.setDisplayName("§a§l[선택됨] " + name);
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    private String getCategoryDisplayName(String key) {
+        if (key.equals(CAT_TOOLS)) return "도구";
+        if (key.equals(CAT_CONSTRUCT)) return "건축";
+        if (key.equals(CAT_CONSUMABLES)) return "소모품";
+        if (key.equals(CAT_LV1)) return "1레벨 작업대";
+        if (key.equals(CAT_LV2)) return "2레벨 작업대";
+        if (key.equals(CAT_LV3)) return "3레벨 작업대";
+        return "알 수 없음";
+    }
+
+    private String getCategoryBySlot(int slot) {
+        return switch (slot) {
+            case 0 -> CAT_TOOLS;
+            case 1 -> CAT_CONSTRUCT;
+            case 2 -> CAT_CONSUMABLES;
+            case 3 -> CAT_LV1;
+            case 4 -> CAT_LV2;
+            case 5 -> CAT_LV3;
+            default -> null;
+        };
+    }
+
+    private void loadRecipesToGUI(Inventory inv, String category) {
+        ConfigurationSection sec = plugin.getConfig().getConfigurationSection("recipes." + category);
+        if (sec == null) return;
+
+        for (String slotKey : sec.getKeys(false)) {
+            try {
+                int slot = Integer.parseInt(slotKey);
+                // GUI 영역(9~44)을 벗어나면 무시
+                if (slot < 9 || slot > 44) continue;
+
+                ConfigurationSection slotSec = sec.getConfigurationSection(slotKey);
+                if (slotSec != null && !slotSec.getKeys(false).isEmpty()) {
+                    String recipeId = slotSec.getKeys(false).iterator().next();
+                    ItemStack result = slotSec.getItemStack(recipeId + ".result");
+                    if (result != null) {
+                        inv.setItem(slot, result);
+                    }
+                }
+            } catch (NumberFormatException ignored) {}
+        }
+    }
+
+    // 아이템을 클릭했을 때 Config 상의 전체 경로를 역추적하는 메서드
+    private String findRecipePath(ItemStack clicked, String category) {
+        ConfigurationSection catSec = plugin.getConfig().getConfigurationSection("recipes." + category);
+        if (catSec == null) return null;
+
+        for (String slotKey : catSec.getKeys(false)) {
+            ConfigurationSection slotSec = catSec.getConfigurationSection(slotKey);
+            if (slotSec == null) continue;
+            for (String id : slotSec.getKeys(false)) {
+                ItemStack saved = slotSec.getItemStack(id + ".result");
+                if (saved != null && saved.isSimilar(clicked)) {
+                    return "recipes." + category + "." + slotKey + "." + id;
+                }
+            }
+        }
+        return null;
+    }
+
+    // 관리자 등록/삭제 처리
+    private void handleAdminAction(Player player, int slot, ItemStack clicked) {
+        String category = playerCurrentCategory.get(player.getUniqueId());
+
+        if (player.getOpenInventory().getTopInventory().getItem(slot) == null && !clicked.getType().isAir()) {
+            // 빈 슬롯이 아님 (삭제 로직) - clicked가 인벤토리 아이템인 경우
+            // 로직 단순화를 위해 여기서는 "기존 아이템 클릭 -> 삭제"
+            removeRecipe(clicked, category);
+            player.sendMessage("§c[System] 레시피가 삭제되었습니다.");
+            openCraftingGUI(player); // 새로고침
+        } else {
+            // 우클릭 -> 등록 창 열기
+            player.setMetadata("reg_path", new org.bukkit.metadata.FixedMetadataValue(plugin, category));
+            player.setMetadata("reg_slot", new org.bukkit.metadata.FixedMetadataValue(plugin, slot));
+            openRegistrationMenu(player);
+            player.sendMessage("§a[System] " + getCategoryDisplayName(category) + " - " + slot + "번 슬롯에 등록을 시작합니다.");
+        }
+    }
+
+    // --- [5] 등록 GUI 및 기존 핸들러 (유지) ---
 
     public void openRegistrationMenu(Player player) {
         Inventory inv = Bukkit.createInventory(null, 9, REG_STEP1_TITLE);
         player.openInventory(inv);
     }
 
-// --- GUI 오픈 메서드 수정 ---
-
     private void openTimeSettingMenu(Player player) {
         Inventory inv = Bukkit.createInventory(null, 9, REG_STEP2_TITLE);
         int currentTime = pendingTime.getOrDefault(player.getUniqueId(), 10);
-
         inv.setItem(0, createItem(Material.RED_STAINED_GLASS_PANE, "§c-10초", ""));
         inv.setItem(1, createItem(Material.ORANGE_STAINED_GLASS_PANE, "§c-1초", ""));
-
-        // 중앙: 현재 시간 표시
         inv.setItem(4, createItem(Material.CLOCK, "§e현재 설정 시간: §f" + currentTime + "초", ""));
-
         inv.setItem(7, createItem(Material.LIME_STAINED_GLASS_PANE, "§a+1초", ""));
         inv.setItem(8, createItem(Material.GREEN_STAINED_GLASS_PANE, "§a+10초", ""));
-
-        // [추가] 슬롯 2번에 최종 등록 완료 버튼 생성
-        inv.setItem(2, createItem(Material.NETHER_STAR, "§a§l[레시피 등록 완료]", "§7클릭하면 최종적으로 저장됩니다."));
-        // [추가] 슬롯 6번에 취소 버튼 생성
-        inv.setItem(6, createItem(Material.BARRIER, "§c[등록 취소]", "§7클릭하면 모든 설정이 삭제됩니다."));
-
+        inv.setItem(2, createItem(Material.NETHER_STAR, "§a§l[레시피 등록 완료]", ""));
+        inv.setItem(6, createItem(Material.BARRIER, "§c[등록 취소]", ""));
         player.openInventory(inv);
     }
 
-    // --- 이벤트 핸들러 ---
-
-    @EventHandler
-    public void onInventoryClick(InventoryClickEvent e) {
+    private void handleRegistrationClick(InventoryClickEvent e) {
         String title = e.getView().getTitle();
         Player player = (Player) e.getWhoClicked();
-        ItemStack clickedItem = e.getCurrentItem();
         int slot = e.getRawSlot();
 
-// 1. 제작 메인 메뉴 (카테고리 선택)
-        if (title.startsWith("§0제작 메뉴")) {
-            if (slot >= e.getInventory().getSize()) return;
-            e.setCancelled(true);
-
-            // [추가] 현재 GUI의 레벨 파악 (타이틀에서 숫자 추출)
-            int currentGuiLevel = 0;
-            if (title.contains("Lv.")) {
-                try {
-                    // "§0제작 메뉴 (Lv.1)" 에서 "1"만 추출
-                    String lvStr = title.split("Lv.")[1].replace(")", "");
-                    currentGuiLevel = Integer.parseInt(lvStr);
-                } catch (Exception ignored) {
-                    currentGuiLevel = 0;
-                }
-            }
-
-            // 기본 메뉴 (도구, 건축, 소모템) - 레벨 상관없이 접근 가능
-            if (slot == 2) openCategoryMenu(player, TOOL_TITLE, "tools");
-            else if (slot == 4) openCategoryMenu(player, CONSTRUCT_TITLE, "construct");
-            else if (slot == 6) openCategoryMenu(player, CONSUMABLE_TITLE, "consumables");
-
-                // [수정] 작업대 레벨별 버튼 - 현재 GUI 레벨보다 높은 레벨은 클릭 차단
-            else if (slot == 11) {
-                if (currentGuiLevel >= 1) openCategoryMenu(player, LV1_TITLE, "lv1");
-            }
-            else if (slot == 13) {
-                if (currentGuiLevel >= 2) openCategoryMenu(player, LV2_TITLE, "lv2");
-            }
-            else if (slot == 15) {
-                if (currentGuiLevel >= 3) openCategoryMenu(player, LV3_TITLE, "lv3");
-            }
-            return;
-        }
-
-        // 2. 통합 제작창 처리 (도구, 건축, 소모템, Lv1~3)
-        if (title.contains("§0제작 -")) {
-            e.setCancelled(true);
-            if (slot >= 45) return; // 대기열 클릭 방지
-
-            String configPath = getPathByTitle(title);
-
-            // [핵심] 관리자 모드: 쉬프트 클릭으로 레시피 관리 (여기가 복구된 부분입니다)
-            if (player.isOp() && e.getClick().isShiftClick()) {
-                // 쉬프트 + 우클릭: 레시피 등록 창 열기
-                if (e.getClick().isRightClick()) {
-                    player.setMetadata("reg_path", new org.bukkit.metadata.FixedMetadataValue(plugin, configPath));
-                    player.setMetadata("reg_slot", new org.bukkit.metadata.FixedMetadataValue(plugin, slot));
-
-                    openRegistrationMenu(player); // 1단계 등록창(8번 결과물 슬롯 있는 창) 열기
-                    player.sendMessage("§a[System] §f" + title + " §a의 " + slot + "번 슬롯에 레시피 등록을 시작합니다.");
-                }
-                // 쉬프트 + 좌클릭: 레시피 삭제
-                else if (e.getClick().isLeftClick() && clickedItem != null) {
-                    removeRecipe(clickedItem, configPath);
-                    player.sendMessage("§c[System] 레시피가 삭제되었습니다.");
-                    openCategoryMenu(player, title, configPath);
-                }
-                return;
-            }
-
-            // [일반 유저] 제작 시작
-            if (clickedItem != null && clickedItem.getType() != Material.AIR) {
-                tryStartCraftingByCategory(player, clickedItem, configPath);
-            }
-            return;
-        }
-
-        // 3. 레시피 등록 1단계 창 (아이템 배치)
         if (title.equals(REG_STEP1_TITLE)) {
-            // 아이템을 직접 배치해야 하므로 e.setCancelled(true)를 하지 않습니다.
-            return;
+            // 1단계: 아이템 올리기 (로직 없음, CloseEvent에서 처리)
         }
-
-        // 4. 레시피 등록 2단계 창 (시간 설정)
-        if (title.equals(REG_STEP2_TITLE)) {
+        else if (title.equals(REG_STEP2_TITLE)) {
             e.setCancelled(true);
             int currentTime = pendingTime.getOrDefault(player.getUniqueId(), 10);
-
             switch (slot) {
                 case 0: currentTime = Math.max(1, currentTime - 10); break;
                 case 1: currentTime = Math.max(1, currentTime - 1); break;
                 case 7: currentTime += 1; break;
                 case 8: currentTime += 10; break;
                 case 2: saveFinalRecipe(player); player.closeInventory(); return;
-                case 6: clearPendingData(player); player.closeInventory();
-                    player.sendMessage("§c[System] 등록 취소."); return;
+                case 6: clearPendingData(player); player.closeInventory(); return;
                 default: return;
             }
-
             pendingTime.put(player.getUniqueId(), currentTime);
             openTimeSettingMenu(player);
-            player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 1.5f);
         }
     }
-    // 타이틀을 통해 config 경로를 찾아주는 편의 메서드
-    private String getPathByTitle(String title) {
-        if (title.equals(TOOL_TITLE)) return "tools";
-        if (title.equals(CONSTRUCT_TITLE)) return "construct";
-        if (title.equals(CONSUMABLE_TITLE)) return "consumables";
-        if (title.equals(LV1_TITLE)) return "lv1";
-        if (title.equals(LV2_TITLE)) return "lv2";
-        if (title.equals(LV3_TITLE)) return "lv3";
-        return "unknown";
+
+    // InventoryCloseEvent, startUpdateTask 등 나머지 필수 메서드는 구조에 맞춰 유지
+    @EventHandler
+    public void onInventoryClose(InventoryCloseEvent e) {
+        if (e.getView().getTitle().equals(REG_STEP1_TITLE)) {
+            Inventory inv = e.getInventory();
+            ItemStack result = inv.getItem(8);
+            if (result == null || result.getType() == Material.AIR) {
+                clearPendingData((Player) e.getPlayer()); return;
+            }
+            List<ItemStack> ings = new ArrayList<>();
+            for (int i=0; i<8; i++) {
+                ItemStack it = inv.getItem(i);
+                if (it!=null && !it.getType().isAir()) ings.add(it);
+            }
+            if (ings.isEmpty()) return;
+
+            Player p = (Player) e.getPlayer();
+            pendingResult.put(p.getUniqueId(), result.clone());
+            pendingIngredients.put(p.getUniqueId(), ings);
+            pendingTime.put(p.getUniqueId(), 10);
+            new BukkitRunnable() { public void run() { openTimeSettingMenu(p); } }.runTaskLater(plugin, 1L);
+        }
+    }
+
+    private void startUpdateTask() {
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                for (UUID uuid : new HashSet<>(craftingQueues.keySet())) {
+                    List<CraftingTask> queue = craftingQueues.get(uuid);
+                    if (queue == null || queue.isEmpty()) continue;
+
+                    CraftingTask current = queue.get(0);
+                    current.remainingTime--;
+
+                    Player player = Bukkit.getPlayer(uuid);
+                    if (player == null || !player.isOnline()) continue;
+
+                    if (current.remainingTime <= 0) {
+                        player.getInventory().addItem(current.result);
+                        player.sendMessage("§a[System] 제작 완료: " + getItemNameKorean(current.result));
+                        player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.5f, 1f);
+                        queue.remove(0);
+                    }
+
+                    if (player.getOpenInventory().getTitle().startsWith("§0제작 시스템")) {
+                        updateBottomArea(player, player.getOpenInventory().getTopInventory());
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 0L, 20L);
     }
 
     @EventHandler
@@ -299,55 +522,28 @@ public class CraftManager implements Listener {
 
         String typeName = block.getType().name();
         Player player = e.getPlayer();
+        UUID uuid = player.getUniqueId();
 
-        // JEG 작업대 레벨 판별
-        int level = 0;
-        if (typeName.equals("JEG_SCRAP_WORKBENCH")) level = 1;
-        else if (typeName.equals("JEG_GUNMETAL_WORKBENCH")) level = 2;
-        else if (typeName.equals("JEG_GUNNITE_WORKBENCH")) level = 3;
+        // 1. 작업대 레벨에 따라 카테고리 문자열 결정
+        String targetCategory = null;
+        if (typeName.equals("JEG_SCRAP_WORKBENCH")) targetCategory = CAT_LV1;
+        else if (typeName.equals("JEG_GUNMETAL_WORKBENCH")) targetCategory = CAT_LV2;
+        else if (typeName.equals("JEG_GUNNITE_WORKBENCH")) targetCategory = CAT_LV3;
 
-        if (level > 0) {
-            e.setCancelled(true); // JEG 모드 원본 창 무시
-            openLeveledMainMenu(player, level);
+        if (targetCategory != null) {
+            e.setCancelled(true);
+
+            // 2. 플레이어의 현재 카테고리 상태를 해당 작업대로 강제 설정
+            playerCurrentCategory.put(uuid, targetCategory);
+            playerCraftAmount.putIfAbsent(uuid, 1);
+            playerSelectedRecipe.remove(uuid); // 이전 선택 초기화
+
+            // 3. 통합 GUI 열기
+            openCraftingGUI(player);
+
             player.playSound(player.getLocation(), Sound.BLOCK_WOODEN_TRAPDOOR_OPEN, 0.5f, 1.5f);
         }
     }
-
-    @EventHandler
-    public void onInventoryClose(InventoryCloseEvent e) {
-        String title = e.getView().getTitle();
-        Player player = (Player) e.getPlayer();
-
-        if (title.equals(REG_STEP1_TITLE)) {
-            Inventory inv = e.getInventory();
-            ItemStack result = inv.getItem(8);
-
-            if (result == null || result.getType() == Material.AIR) {
-                // 버튼 클릭으로 창이 바뀌는 게 아니라 진짜 ESC로 닫았을 때만 데이터 삭제
-                if (player.getOpenInventory().getTitle().equals("Container")) clearPendingData(player);
-                return;
-            }
-
-            List<ItemStack> ingredients = new ArrayList<>();
-            for (int i = 0; i < 8; i++) {
-                ItemStack item = inv.getItem(i);
-                if (item != null && item.getType() != Material.AIR) ingredients.add(item);
-            }
-
-            if (ingredients.isEmpty()) return;
-
-            pendingResult.put(player.getUniqueId(), result.clone());
-            pendingIngredients.put(player.getUniqueId(), ingredients);
-            pendingTime.put(player.getUniqueId(), 10);
-
-            new BukkitRunnable() {
-                @Override
-                public void run() { openTimeSettingMenu(player); }
-            }.runTaskLater(plugin, 1L);
-        }
-        // REG_STEP2_TITLE에 대한 자동 저장 로직은 제거함 (완료 버튼으로 대체)
-    }
-
     // --- 내부 비즈니스 로직 ---
 
     private void saveRecipe(ItemStack result, List<ItemStack> ingredients, int time) {
@@ -420,19 +616,6 @@ public class CraftManager implements Listener {
         }
     }
 
-    // [추가] 제작 프로세스 실행 메서드 (중복 제거용)
-    private void startCraftingProcess(Player player, ItemStack result, List<ItemStack> ingredients, int time) {
-        List<CraftingTask> queue = craftingQueues.computeIfAbsent(player.getUniqueId(), k -> new ArrayList<>());
-        if (queue.size() >= 9) {
-            player.sendMessage("§c[System] 대기열이 가득 찼습니다.");
-            return;
-        }
-        removeIngredients(player, ingredients);
-        queue.add(new CraftingTask(result.clone(), time));
-        player.sendMessage("§e[System] 제작을 시작합니다.");
-        player.playSound(player.getLocation(), Sound.BLOCK_ANVIL_USE, 0.5f, 1.5f);
-    }
-
     private void startFurnaceParticleTask() {
         new BukkitRunnable() {
             @Override
@@ -472,7 +655,7 @@ public class CraftManager implements Listener {
         // facing.getDirection()은 입구 쪽을 향하는 화살표입니다.
         // 여기에 음수(-)를 곱하면 '입구 반대편(안쪽)'으로 이동합니다.
         // -0.1 ~ -0.2 정도면 화로 모델의 빈 공간 중심에 딱 위치합니다.
-        double depth = -0.15;
+        double depth = -0.1;
         Vector offset = facing.getDirection().multiply(depth);
         // 3. 높이 조정 (화로 바닥보다 살짝 위)
         Location particleLoc = center.add(offset);
@@ -485,96 +668,22 @@ public class CraftManager implements Listener {
             block.getWorld().spawnParticle(org.bukkit.Particle.LAVA, particleLoc, 1, 0, 0, 0, 0);
         }
     }
-
-    private void startUpdateTask() {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                for (UUID uuid : new HashSet<>(craftingQueues.keySet())) {
-                    List<CraftingTask> queue = craftingQueues.get(uuid);
-                    if (queue == null || queue.isEmpty()) continue;
-
-                    // 1. 시간 감소 로직
-                    CraftingTask current = queue.get(0);
-                    current.remainingTime--;
-
-                    Player player = Bukkit.getPlayer(uuid);
-                    if (player == null || !player.isOnline()) continue;
-
-                    // 2. 제작 완료 처리
-                    if (current.remainingTime <= 0) {
-                        player.getInventory().addItem(current.result);
-
-                        // ⭐ getItemNameKorean(current.result) 적용
-                        String finalName = getItemNameKorean(current.result);
-
-                        player.sendMessage("§a[System] 제작 완료: " + finalName);
-                        player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.5f, 1f);
-                        queue.remove(0);
-                    }
-
-                    // 3. [핵심] 실시간 인벤토리 갱신
-                    // 플레이어가 어떤 제작창이라도 보고 있다면 하단 대기열을 새로고침함
-                    String title = player.getOpenInventory().getTitle();
-                    if (title.contains("§0제작 -")) {
-                        updateQueueDisplay(player, player.getOpenInventory().getTopInventory());
-                    }
-                }
-            }
-        }.runTaskTimer(plugin, 0L, 20L); // 20틱 = 1초마다 실행
-    }
-
-    private void updateQueueDisplay(Player player, Inventory inv) {
-        List<CraftingTask> queue = craftingQueues.getOrDefault(player.getUniqueId(), new ArrayList<>());
-
-        for (int i = 0; i < 9; i++) {
-            int slot = 45 + i; // 하단 9칸 (45~53)
-
-            if (i < queue.size()) {
-                CraftingTask task = queue.get(i);
-                ItemStack item = task.result.clone();
-                ItemMeta meta = item.getItemMeta();
-
-                if (meta != null) {
-                    List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
-                    // 기존의 시간 표시가 중복되지 않도록 마지막 줄을 관리하거나 새로 추가
-                    lore.add("§7---");
-                    if (i == 0) {
-                        lore.add("§e▶ 제작 중: §f" + task.remainingTime + "초");
-                    } else {
-                        lore.add("§7대기 중: §f" + task.remainingTime + "초");
-                    }
-                    meta.setLore(lore);
-                    item.setItemMeta(meta);
-                }
-                inv.setItem(slot, item);
-            } else {
-                // 빈 대기열 칸
-                inv.setItem(slot, createItem(Material.GRAY_STAINED_GLASS_PANE, "§8대기열 비어 있음", ""));
-            }
-        }
-    }
-
-    private void removeRecipe(ItemStack result, String path) {
-        ConfigurationSection section = plugin.getConfig().getConfigurationSection("recipes." + path);
+    private void removeRecipe(ItemStack result, String category) {
+        ConfigurationSection section = plugin.getConfig().getConfigurationSection("recipes." + category);
         if (section == null) return;
-
         for (String slotKey : section.getKeys(false)) {
             ConfigurationSection slotSection = section.getConfigurationSection(slotKey);
             if (slotSection == null) continue;
-
             for (String recipeId : slotSection.getKeys(false)) {
                 ItemStack item = slotSection.getItemStack(recipeId + ".result");
                 if (item != null && item.isSimilar(result)) {
-                    // 해당 슬롯 통째로 삭제 (또는 특정 레시피만 삭제하려면 recipeId 경로 삭제)
-                    plugin.getConfig().set("recipes." + path + "." + slotKey, null);
+                    plugin.getConfig().set("recipes." + category + "." + slotKey, null);
                     plugin.saveConfig();
                     return;
                 }
             }
         }
     }
-
     private boolean hasIngredients(Player player, List<ItemStack> ingredients) {
         for (ItemStack needed : ingredients) {
             if (!player.getInventory().containsAtLeast(needed, needed.getAmount())) return false;
@@ -592,9 +701,7 @@ public class CraftManager implements Listener {
         if (meta != null) {
             meta.setDisplayName(name);
             if (!lore.isEmpty()) {
-                List<String> lores = new ArrayList<>();
-                lores.add(lore);
-                meta.setLore(lores);
+                meta.setLore(Arrays.asList(lore.split("\n")));
             }
             item.setItemMeta(meta);
         }
@@ -634,7 +741,6 @@ public class CraftManager implements Listener {
         String basePath = "recipes." + path + "." + slotKey + "." + recipeId;
 
         plugin.getConfig().set(basePath + ".result", result);
-        // 재료의 한글 이름을 리스트 형태로 저장하거나 메타데이터를 보존함
         plugin.getConfig().set(basePath + ".ingredients", ingredients);
         plugin.getConfig().set(basePath + ".time", time);
         plugin.saveConfig();
@@ -646,12 +752,34 @@ public class CraftManager implements Listener {
         pendingIngredients.remove(uuid);
         pendingTime.remove(uuid);
     }
+    // 주변 10블록 이내의 작업대 중 가장 높은 레벨을 반환 (0: 없음, 1: Scrap, 2: Gunmetal, 3: Gunnite)
+    private int getNearbyWorkbenchLevel(Player player) {
+        Location loc = player.getLocation();
+        int maxLevel = 0;
 
-    @EventHandler
-    public void onPlayerSwapHand(PlayerSwapHandItemsEvent e) {
-        Player player = e.getPlayer();
-        e.setCancelled(true);
-        openMainMenu(player);
-        player.playSound(player.getLocation(), Sound.BLOCK_WOODEN_TRAPDOOR_OPEN, 0.5f, 1.5f);
+        // 주변 10x10x10 탐색
+        for (int x = -5; x <= 5; x++) {
+            for (int y = -3; y <= 3; y++) {
+                for (int z = -5; z <= 5; z++) {
+                    Material type = loc.clone().add(x, y, z).getBlock().getType();
+                    String typeName = type.name();
+
+                    if (typeName.equals("JEG_SCRAP_WORKBENCH")) maxLevel = Math.max(maxLevel, 1);
+                    else if (typeName.equals("JEG_GUNMETAL_WORKBENCH")) maxLevel = Math.max(maxLevel, 2);
+                    else if (typeName.equals("JEG_GUNNITE_WORKBENCH")) maxLevel = Math.max(maxLevel, 3);
+
+                    // 3레벨(최고)을 찾으면 더 이상 탐색할 필요 없음
+                    if (maxLevel == 3) return 3;
+                }
+            }
+        }
+        return maxLevel;
+    }
+    // 기존의 sendAmountPacket은 삭제하거나 아래처럼 통합하세요.
+    private void syncAmountToMod(Player player, int amount) {
+        ByteArrayDataOutput out = ByteStreams.newDataOutput();
+        out.writeByte(11);
+        out.writeInt(amount);
+        player.sendPluginMessage(plugin, "examplemod:messages", out.toByteArray());
     }
 }

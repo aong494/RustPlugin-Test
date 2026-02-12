@@ -402,13 +402,22 @@ public class DoorManager implements Listener {
         playDoorSound(master, nextState);
     }
     private void playDoorSound(Block b, boolean open) {
-        Sound sound = b.getType() == Material.IRON_DOOR ?
-                (open ? Sound.BLOCK_IRON_DOOR_OPEN : Sound.BLOCK_IRON_DOOR_CLOSE) :
-                (open ? Sound.BLOCK_WOODEN_DOOR_OPEN : Sound.BLOCK_WOODEN_DOOR_CLOSE);
+        String typeName = b.getType().name().toUpperCase();
+        boolean isArmored = typeName.contains("ARMORED_DOOR");
+        boolean isIron = b.getType() == Material.IRON_DOOR;
+
+        Sound sound;
+
+        // 철문이거나 아머드 도어일 때 철문 소리 재생
+        if (isIron || isArmored) {
+            sound = open ? Sound.BLOCK_IRON_DOOR_OPEN : Sound.BLOCK_IRON_DOOR_CLOSE;
+        } else {
+            // 그 외 일반 문은 나무문 소리 재생
+            sound = open ? Sound.BLOCK_WOODEN_DOOR_OPEN : Sound.BLOCK_WOODEN_DOOR_CLOSE;
+        }
 
         b.getWorld().playSound(b.getLocation(), sound, 1f, 1f);
     }
-
     private void updateDoorState(Block b, boolean open) {
         if (b.getBlockData() instanceof Door d) {
             d.setOpen(open);

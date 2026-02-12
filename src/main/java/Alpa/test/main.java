@@ -1,5 +1,8 @@
 package Alpa.test;
 
+import com.google.common.io.ByteArrayDataInput;
+import com.google.common.io.ByteArrayDataOutput;
+import com.google.common.io.ByteStreams;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.md_5.bungee.api.ChatMessageType;
@@ -80,6 +83,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     public HologramManager hologramManager;
     public DoorManager doorManager;
     public BlockDecayManager blockDecayManager;
+    private CardKeyManager cardKeyManager;
 
     @Override
         public void onEnable() {
@@ -113,10 +117,11 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             this.hologramManager = new HologramManager(this);
             this.doorManager = new DoorManager(this);
             this.blockDecayManager = new BlockDecayManager(this);
-            this.blockDecayManager.runTaskTimer(this, 200L, 1200L);
-            this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:main_channel");
+            this.blockDecayManager.runTaskTimer(this, 24000L, 24000L);
+            cardKeyManager = new CardKeyManager(this);
+            this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:main");
             this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:messages");
-
+            this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:group_data");
 
             addDefaultSettings();
         org.bukkit.plugin.PluginManager pm = getServer().getPluginManager();
@@ -144,6 +149,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         pm.registerEvents(refineryManager, this);
         pm.registerEvents(new FurnaceListener(), this);
         pm.registerEvents(new BlueprintManager(this), this);
+        pm.registerEvents(new CardKeyListener(this, cardKeyManager), this);
 
         if (!getConfig().contains("stone-settings")) {
             getConfig().set("stone-settings.repair-amount", 20); // 석재 수리량
@@ -181,14 +187,14 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
 
         new BlockDecayManager(this).runTaskTimer(this, intervalTicks, intervalTicks);
 
-        Bukkit.getLogger().info("[System] 체력 감소 시스템이 " + intervalSeconds + "초 주기로 시작되었습니다.");
-
         // 명령어 등록
         if (getCommand("그룹") != null) getCommand("그룹").setExecutor(this);
         if (getCommand("침대") != null) getCommand("침대").setExecutor(this.bedManager);
         if (getCommand("제작") != null) {
             getCommand("제작").setExecutor((sender, command, label, args) -> {
-                if (sender instanceof Player) craftManager.openMainMenu((Player) sender);
+                if (sender instanceof Player) {
+                    craftManager.openDefaultCrafting((Player) sender);
+                }
                 return true;
             });
         }
@@ -198,10 +204,182 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             for (Player player : Bukkit.getOnlinePlayers()) {
                 updateGroupScoreboard(player);
             }
-        }, 0L, 20L);
+        }, 0L, 100L);
+        Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
+            if(this.blockRegenManager != null) this.blockRegenManager.savePending();
+            if(this.dataStorage != null) this.dataStorage.saveConfig();
+        }, 6000L, 6000L);
+        Bukkit.getScheduler().runTaskTimer(this, this::sendGroupMemberLocations, 0L, 5L);
         restoreBlocksAfterReboot();
+        getCommand("카드키").setExecutor(new CardKeyCommand(cardKeyManager));
+        this.getServer().getMessenger().registerIncomingPluginChannel(this, "examplemod:main", (channel, player, message) -> {
+            handleIncomingPacket(player, message);
+        });
+    }
+    private void handleIncomingPacket(Player player, byte[] message) {
+        ByteArrayDataInput in = ByteStreams.newDataInput(message);
+        byte packetId = in.readByte();
+
+        if (packetId == 2) { // 핑 패킷 수신
+            float x = in.readFloat();
+            float z = in.readFloat();
+            boolean isRemove = in.readBoolean();
+
+            String groupName = groupManager.getPlayerGroup(player);
+            if (groupName != null) {
+                List<String> members = groupManager.getGroupMembers(groupName);
+                int memberIndex = members.indexOf(player.getUniqueId().toString()) + 1;
+                if (memberIndex <= 0) memberIndex = 1;
+
+                if (isRemove) {
+                    groupManager.removeGroupPing(groupName, x, z);
+                } else {
+                    groupManager.addGroupPing(groupName, x, z);
+                }
+
+                for (String memberUUID : members) {
+                    Player member = Bukkit.getPlayer(UUID.fromString(memberUUID));
+                    if (member != null && member.isOnline()) {
+                        sendPingToClient(member, x, z, isRemove, memberIndex);
+                    }
+                }
+            } else {
+                sendPingToClient(player, x, z, isRemove, 1);
+            }
+        }
+    }
+    @Override
+    public void onDisable() {
+        if (this.hologramManager != null) {
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                this.hologramManager.removePreview(p);
+            }
+        }
+        if (blockRegenManager != null) {
+            blockRegenManager.savePending();
+        }
+        for (Player player : Bukkit.getOnlinePlayers()) {
+        }
+        // 모든 인스턴스의 홀로그램과 태스크를 정리
+        if (this.raidManager != null) {
+            this.raidManager.cleanup();
+            for (World world : Bukkit.getWorlds()) {
+                for (Entity entity : world.getEntities()) {
+                    if (entity instanceof ArmorStand && entity.getScoreboardTags().contains("raid_hologram")) {
+                        if (!entity.getScoreboardTags().contains("kubejs_managed")) {
+                            entity.remove();
+                        }
+                    }
+                }
+            }
+        }
+        if (this.electricManager != null) {
+            this.electricManager.saveBlocks();
+            getLogger().info("[Electric] 전력 시스템 데이터가 저장되었습니다.");
+        }
+        getLogger().info("플러그인이 비활성화되었습니다.");
+    }
+    @EventHandler
+    public void onJoin(org.bukkit.event.player.PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            String groupName = groupManager.getPlayerGroup(player);
+            if (groupName != null) {
+                List<String> pings = groupManager.getGroupPings(groupName);
+                List<String> members = groupManager.getGroupMembers(groupName);
+                int defaultIndex = members.indexOf(player.getUniqueId().toString()) + 1;
+                if (defaultIndex <= 0) defaultIndex = 1;
+
+                for (String pingStr : pings) {
+                    String[] split = pingStr.split(",");
+                    if (split.length >= 2) {
+                        sendPingToClient(player, Float.parseFloat(split[0]), Float.parseFloat(split[1]), false, defaultIndex);
+                    }
+                }
+            }
+        }, 40L);
+    }
+    private void sendPingToClient(Player receiver, float x, float z, boolean isRemove, int memberIndex) {
+        ByteArrayDataOutput out = ByteStreams.newDataOutput();
+        out.writeByte(2);
+        out.writeFloat(x);
+        out.writeFloat(z);
+        out.writeBoolean(isRemove);
+        out.writeInt(memberIndex);
+        receiver.sendPluginMessage(this, "examplemod:main", out.toByteArray());
+    }
+    private void sendGroupMemberLocations() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            String groupName = groupManager.getPlayerGroup(player);
+            if (groupName == null) continue;
+
+            List<String> memberUUIDs = groupManager.getGroupMembers(groupName);
+            for (String uuidStr : memberUUIDs) {
+                Player member = Bukkit.getPlayer(UUID.fromString(uuidStr));
+                if (member != null && member.isOnline()) {
+                    if (player.getWorld().equals(member.getWorld())) {
+                        sendLocationPacket(player, member);
+                    }
+                }
+            }
+        }
+    }
+    private void sendLocationPacket(Player receiver, Player member) {
+        String groupName = groupManager.getPlayerGroup(member);
+        List<String> members = groupManager.getGroupMembers(groupName);
+
+        // 가입 순서(리스트 인덱스) 가져오기 (0번부터 시작하므로 +1)
+        int memberIndex = members.indexOf(member.getUniqueId().toString()) + 1;
+        if (memberIndex <= 0) memberIndex = 1; // 예외 처리
+
+        ByteArrayDataOutput out = ByteStreams.newDataOutput();
+        out.writeUTF("MEMBER_LOC");
+        out.writeUTF(member.getUniqueId().toString());
+        out.writeUTF(member.getName());
+        out.writeDouble(member.getLocation().getX());
+        out.writeDouble(member.getLocation().getZ());
+        out.writeInt(memberIndex); // 순환 숫자 전송
+
+        receiver.sendPluginMessage(this, "examplemod:group_data", out.toByteArray());
+    }
+    // 플러그인 메인 클래스 (Java)
+    public void startMapSyncTask() {
+        Bukkit.getScheduler().runTaskTimer(this, () -> {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                String groupName = groupManager.getPlayerGroup(player);
+                if (groupName == null) continue;
+
+                List<String> members = groupManager.getGroupMembers(groupName);
+                for (String memberUUID : members) {
+                    Player member = Bukkit.getPlayer(UUID.fromString(memberUUID));
+                    if (member != null && member.isOnline()) {
+                        // GroupLocationPacket 전송 (PacketHandler ID: 1번 가정)
+                        sendGroupLoc(player, member);
+                    }
+                }
+            }
+        }, 0L, 20L); // 1초마다 갱신
     }
 
+    private void sendGroupLoc(Player receiver, Player member) {
+        String groupName = groupManager.getPlayerGroup(member);
+        List<String> members = groupManager.getGroupMembers(groupName);
+        int memberIndex = members.indexOf(member.getUniqueId().toString()) + 1;
+        if (memberIndex <= 0) memberIndex = 1;
+
+        ByteArrayDataOutput out = ByteStreams.newDataOutput();
+        out.writeByte(1);
+        out.writeLong(member.getUniqueId().getMostSignificantBits());
+        out.writeLong(member.getUniqueId().getLeastSignificantBits());
+
+        out.writeUTF(member.getName());
+        out.writeDouble(member.getLocation().getX());
+        out.writeDouble(member.getLocation().getZ());
+        out.writeInt(memberIndex);
+
+        receiver.sendPluginMessage(this, "examplemod:main", out.toByteArray());
+    }
     public void createTurretConfig() {
         turretFile = new File(getDataFolder(), "turret.yml");
         if (!turretFile.exists()) {
@@ -234,37 +412,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         return raidManager;
     }
 
-    @Override
-    public void onDisable() {
-        if (this.hologramManager != null) {
-            for (Player p : Bukkit.getOnlinePlayers()) {
-                this.hologramManager.removePreview(p);
-            }
-        }
-        if (blockRegenManager != null) {
-            blockRegenManager.savePending();
-        }
-        for (Player player : Bukkit.getOnlinePlayers()) {
-        }
-        // 모든 인스턴스의 홀로그램과 태스크를 정리
-        if (this.raidManager != null) {
-            this.raidManager.cleanup();
-            for (World world : Bukkit.getWorlds()) {
-                for (Entity entity : world.getEntities()) {
-                    if (entity instanceof ArmorStand && entity.getScoreboardTags().contains("raid_hologram")) {
-                        if (!entity.getScoreboardTags().contains("kubejs_managed")) {
-                            entity.remove();
-                        }
-                    }
-                }
-            }
-        }
-        if (this.electricManager != null) {
-            this.electricManager.saveBlocks();
-            getLogger().info("[Electric] 전력 시스템 데이터가 저장되었습니다.");
-        }
-        getLogger().info("플러그인이 비활성화되었습니다.");
-    }
 
     private void updateGroupScoreboard(Player player) {
         ScoreboardManager manager = Bukkit.getScoreboardManager();
@@ -863,7 +1010,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         int z = Integer.parseInt(parts[3]);
         Block b = world.getBlockAt(x, y, z);
         // --- [추가] 터렛 상부 모델링 제거 로직 ---
-        if (b.getType() == Material.GOLD_BLOCK) {
+        if (b.getType() == Material.TINTED_GLASS) {
             if (this.turretManager != null) {
                 // 1. 상부 모델(종이)은 그냥 지우기 (드롭 X)
                 this.turretManager.removeTurret(b.getLocation());
@@ -993,7 +1140,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         } else if (isDoor) {
             correctName = "나무 문";
             correctMax = 100;
-        } else if (type == Material.GOLD_BLOCK) {
+        } else if (type == Material.TINTED_GLASS) {
             correctName = "자동 터렛";
             correctMax = 200;
         } else if (typeName.contains("IRON_BLOCK")) {
@@ -1024,7 +1171,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         // 사운드 설정
         Sound breakSound = Sound.BLOCK_WOOD_BREAK;
         Sound hitSound = Sound.BLOCK_WOOD_HIT;
-        if (type == Material.GOLD_BLOCK || typeName.contains("IRON")) {
+        if (type == Material.TINTED_GLASS || typeName.contains("IRON")) {
             breakSound = Sound.BLOCK_METAL_BREAK;
             hitSound = Sound.BLOCK_METAL_HIT;
         }
@@ -1033,7 +1180,9 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         if (newHp <= 0) {
             removeLockEntity(master);
             // 파괴되는 경우
-            if (type == Material.GOLD_BLOCK) {
+            if (type == Material.TINTED_GLASS) {
+                // [중요] 여기서 TurretManager의 모델 제거 로직을 호출함
+                this.turretManager.removeTurret(b.getLocation());
                 this.turretManager.dropTurretItems(b.getLocation());
             }
             // 3. [핵심] 블록 제거 로직 분기
@@ -1412,7 +1561,10 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             java.io.DataOutputStream out = new java.io.DataOutputStream(b);
             out.writeByte(6);
             out.writeBoolean(isDecaying);
-            out.writeUTF(costStr);
+
+            byte[] strBytes = costStr.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            writeVarInt(out, strBytes.length);
+            out.write(strBytes);
 
             player.sendPluginMessage(this, "examplemod:messages", b.toByteArray());
         } catch (Exception e) {
@@ -1425,6 +1577,24 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             value >>>= 7;
         }
         out.writeByte(value);
+    }
+    // main.java 클래스 안에 추가하세요
+    public Location keyToLocation(String key) {
+        try {
+            String[] parts = key.split("_");
+            if (parts.length < 4) return null;
+
+            org.bukkit.World world = Bukkit.getWorld(parts[0]);
+            if (world == null) return null;
+
+            double x = Double.parseDouble(parts[1]);
+            double y = Double.parseDouble(parts[2]);
+            double z = Double.parseDouble(parts[3]);
+
+            return new Location(world, x, y, z);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
 
