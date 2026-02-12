@@ -84,6 +84,15 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     public DoorManager doorManager;
     public BlockDecayManager blockDecayManager;
     private CardKeyManager cardKeyManager;
+    private final Map<UUID, Location> lastSentLocation = new HashMap<>();
+    public PlankToIronManager plankToIronManager;
+    public JoinManager joinManager;
+    public EnvironmentManager environmentManager;
+    public RespawnListener respawnListener;
+    public InteractBlockListener interactBlockListener;
+    public BlockDrops blockDrops;
+    public MobListener mobListener;
+    public FurnaceListener furnaceListener;
 
     @Override
         public void onEnable() {
@@ -117,8 +126,15 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             this.hologramManager = new HologramManager(this);
             this.doorManager = new DoorManager(this);
             this.blockDecayManager = new BlockDecayManager(this);
-            this.blockDecayManager.runTaskTimer(this, 24000L, 24000L);
             cardKeyManager = new CardKeyManager(this);
+            this.plankToIronManager = new PlankToIronManager(this);
+            this.joinManager = new JoinManager(this);
+            this.environmentManager = new EnvironmentManager(this);
+            this.respawnListener = new RespawnListener(this);
+            this.interactBlockListener = new InteractBlockListener(this);
+            this.blockDrops = new BlockDrops(this);
+            this.mobListener = new MobListener();
+            this.furnaceListener = new FurnaceListener();
             this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:main");
             this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:messages");
             this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:group_data");
@@ -132,23 +148,23 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         pm.registerEvents(this.electricManager, this);
 
         // 3. 기타 매니저 등록 (인스턴스 생성이 필요한 것들)
-        pm.registerEvents(new PlankToIronManager(this), this);
-        pm.registerEvents(new JoinManager(this), this);
-        pm.registerEvents(new EnvironmentManager(this), this);
-        pm.registerEvents(new ReinforcedManager(this), this);
-        pm.registerEvents(new RespawnListener(this), this);
-        pm.registerEvents(new InteractBlockListener(this), this);
-        pm.registerEvents(new BlockListener(this), this);
+        pm.registerEvents(this.plankToIronManager, this);
+        pm.registerEvents(this.joinManager, this);
+        pm.registerEvents(this.environmentManager, this);
+        pm.registerEvents(this.reinforcedManager,this);
+        pm.registerEvents(this.respawnListener, this);
+        pm.registerEvents(this.interactBlockListener, this);
+        pm.registerEvents(this.blockListener, this);
         pm.registerEvents(new RaidListener(this), this);
-        pm.registerEvents(new BlockDrops(this), this);
-        pm.registerEvents(new MobListener(), this);
-        pm.registerEvents(new RouletteListener(this, this.rouletteManager), this);
-        pm.registerEvents(new DoorManager(this), this);
+        pm.registerEvents(this.blockDrops, this);
+        pm.registerEvents(this.mobListener, this);
+        pm.registerEvents(this.rouletteListener, this);
+        pm.registerEvents(this.doorManager, this);
         pm.registerEvents(this, this);
         pm.registerEvents(this.turretManager, this);
         pm.registerEvents(refineryManager, this);
-        pm.registerEvents(new FurnaceListener(), this);
-        pm.registerEvents(new BlueprintManager(this), this);
+        pm.registerEvents(this.furnaceListener, this);
+        pm.registerEvents(this.blueprintManager,this);
         pm.registerEvents(new CardKeyListener(this, cardKeyManager), this);
 
         if (!getConfig().contains("stone-settings")) {
@@ -182,10 +198,8 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             saveConfig();
         }
 
-        long intervalSeconds = getConfig().getLong("decay-settings.interval-seconds", 10L);
-        long intervalTicks = intervalSeconds * 20L;
-
-        new BlockDecayManager(this).runTaskTimer(this, intervalTicks, intervalTicks);
+        long intervalSeconds = getConfig().getLong("decay-settings.interval-seconds", 3600L);
+        this.blockDecayManager.runTaskTimer(this, intervalSeconds * 20L, intervalSeconds * 20L);
 
         // 명령어 등록
         if (getCommand("그룹") != null) getCommand("그룹").setExecutor(this);
