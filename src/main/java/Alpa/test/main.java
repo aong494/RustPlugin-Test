@@ -5,6 +5,8 @@ import com.google.common.io.ByteArrayDataOutput;
 import com.google.common.io.ByteStreams;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import net.citizensnpcs.api.CitizensAPI;
+import net.citizensnpcs.api.npc.NPC;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.*;
@@ -28,21 +30,16 @@ import org.bukkit.event.block.BlockSpreadEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.scoreboard.DisplaySlot;
-import org.bukkit.scoreboard.Objective;
-import org.bukkit.scoreboard.Scoreboard;
-import org.bukkit.scoreboard.ScoreboardManager;
+import org.bukkit.scoreboard.*;
 
 import java.io.*;
-import java.lang.reflect.Type;
 import java.util.*;
-import java.nio.charset.StandardCharsets;
-import java.nio.ByteBuffer;
 import com.google.gson.*;
 import com.google.gson.reflect.TypeToken;
 
@@ -84,7 +81,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     public DoorManager doorManager;
     public BlockDecayManager blockDecayManager;
     private CardKeyManager cardKeyManager;
-    private final Map<UUID, Location> lastSentLocation = new HashMap<>();
     public PlankToIronManager plankToIronManager;
     public JoinManager joinManager;
     public EnvironmentManager environmentManager;
@@ -93,6 +89,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     public BlockDrops blockDrops;
     public MobListener mobListener;
     public FurnaceListener furnaceListener;
+    public DeadManager deadManager;
 
     @Override
         public void onEnable() {
@@ -135,9 +132,11 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             this.blockDrops = new BlockDrops(this);
             this.mobListener = new MobListener();
             this.furnaceListener = new FurnaceListener();
+            this.deadManager = new DeadManager(this);
             this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:main");
             this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:messages");
             this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:group_data");
+            this.getServer().getMessenger().registerOutgoingPluginChannel(this, "rust:bed_data");
 
             addDefaultSettings();
         org.bukkit.plugin.PluginManager pm = getServer().getPluginManager();
@@ -166,6 +165,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         pm.registerEvents(this.furnaceListener, this);
         pm.registerEvents(this.blueprintManager,this);
         pm.registerEvents(new CardKeyListener(this, cardKeyManager), this);
+        pm.registerEvents(this.deadManager, this);
 
         if (!getConfig().contains("stone-settings")) {
             getConfig().set("stone-settings.repair-amount", 20); // 석재 수리량
@@ -195,7 +195,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         // config 설정 로직
         if (!getConfig().contains("decay-settings.interval-seconds")) {
             getConfig().set("decay-settings.interval-seconds", 10);
-            saveConfig();
         }
 
         long intervalSeconds = getConfig().getLong("decay-settings.interval-seconds", 3600L);
@@ -212,7 +211,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
                 return true;
             });
         }
-
         // 스코어보드 업데이트 스케줄러
         Bukkit.getScheduler().runTaskTimer(this, () -> {
             for (Player player : Bukkit.getOnlinePlayers()) {
@@ -220,15 +218,36 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             }
         }, 0L, 100L);
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
+            // 1. 재생성 매니저 저장
             if(this.blockRegenManager != null) this.blockRegenManager.savePending();
-            if(this.dataStorage != null) this.dataStorage.saveConfig();
-        }, 6000L, 6000L);
-        Bukkit.getScheduler().runTaskTimer(this, this::sendGroupMemberLocations, 0L, 5L);
+
+            // 2. 데이터 저장 (데이터가 비어있지 않을 때만 실행)
+            if(this.dataStorage != null) {
+                ConfigurationSection config = this.dataStorage.getConfig();
+                // planks나 doors 섹션이 실제로 존재하고 비어있지 않은지 확인
+                boolean hasPlanks = config.contains("planks") && !config.getConfigurationSection("planks").getKeys(false).isEmpty();
+                boolean hasDoors = config.contains("doors") && !config.getConfigurationSection("doors").getKeys(false).isEmpty();
+
+                if (hasPlanks || hasDoors) {
+                    this.dataStorage.saveConfig();
+                }
+            }
+        }, 600L, 600L);
         restoreBlocksAfterReboot();
         getCommand("카드키").setExecutor(new CardKeyCommand(cardKeyManager));
         this.getServer().getMessenger().registerIncomingPluginChannel(this, "examplemod:main", (channel, player, message) -> {
             handleIncomingPacket(player, message);
         });
+        getServer().getScheduler().runTaskLater(this, () -> {
+            deadManager.restoreNPCAnimations();
+            getLogger().info("[Rust] 모든 로그아웃 NPC의 애니메이션을 복구했습니다.");
+        }, 60L);
+    }
+    public void createVoidWorld(String name) {
+        WorldCreator creator = new WorldCreator(name);
+        creator.generator(new VoidGenerator()); // 우리가 만든 생성기 강제 지정
+        creator.generateStructures(false);
+        Bukkit.createWorld(creator);
     }
     private void handleIncomingPacket(Player player, byte[] message) {
         ByteArrayDataInput in = ByteStreams.newDataInput(message);
@@ -314,6 +333,13 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             }
         }, 40L);
     }
+    public void checkCitizens() {
+        if (Bukkit.getPluginManager().getPlugin("Citizens") == null ||
+                !Bukkit.getPluginManager().getPlugin("Citizens").isEnabled()) {
+            Bukkit.getLogger().severe("Citizens 플러그인을 찾을 수 없습니다! NPC 기능이 작동하지 않습니다.");
+            return;
+        }
+    }
     private void sendPingToClient(Player receiver, float x, float z, boolean isRemove, int memberIndex) {
         ByteArrayDataOutput out = ByteStreams.newDataOutput();
         out.writeByte(2);
@@ -323,59 +349,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         out.writeInt(memberIndex);
         receiver.sendPluginMessage(this, "examplemod:main", out.toByteArray());
     }
-    private void sendGroupMemberLocations() {
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            String groupName = groupManager.getPlayerGroup(player);
-            if (groupName == null) continue;
-
-            List<String> memberUUIDs = groupManager.getGroupMembers(groupName);
-            for (String uuidStr : memberUUIDs) {
-                Player member = Bukkit.getPlayer(UUID.fromString(uuidStr));
-                if (member != null && member.isOnline()) {
-                    if (player.getWorld().equals(member.getWorld())) {
-                        sendLocationPacket(player, member);
-                    }
-                }
-            }
-        }
-    }
-    private void sendLocationPacket(Player receiver, Player member) {
-        String groupName = groupManager.getPlayerGroup(member);
-        List<String> members = groupManager.getGroupMembers(groupName);
-
-        // 가입 순서(리스트 인덱스) 가져오기 (0번부터 시작하므로 +1)
-        int memberIndex = members.indexOf(member.getUniqueId().toString()) + 1;
-        if (memberIndex <= 0) memberIndex = 1; // 예외 처리
-
-        ByteArrayDataOutput out = ByteStreams.newDataOutput();
-        out.writeUTF("MEMBER_LOC");
-        out.writeUTF(member.getUniqueId().toString());
-        out.writeUTF(member.getName());
-        out.writeDouble(member.getLocation().getX());
-        out.writeDouble(member.getLocation().getZ());
-        out.writeInt(memberIndex); // 순환 숫자 전송
-
-        receiver.sendPluginMessage(this, "examplemod:group_data", out.toByteArray());
-    }
-    // 플러그인 메인 클래스 (Java)
-    public void startMapSyncTask() {
-        Bukkit.getScheduler().runTaskTimer(this, () -> {
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                String groupName = groupManager.getPlayerGroup(player);
-                if (groupName == null) continue;
-
-                List<String> members = groupManager.getGroupMembers(groupName);
-                for (String memberUUID : members) {
-                    Player member = Bukkit.getPlayer(UUID.fromString(memberUUID));
-                    if (member != null && member.isOnline()) {
-                        // GroupLocationPacket 전송 (PacketHandler ID: 1번 가정)
-                        sendGroupLoc(player, member);
-                    }
-                }
-            }
-        }, 0L, 20L); // 1초마다 갱신
-    }
-
     private void sendGroupLoc(Player receiver, Player member) {
         String groupName = groupManager.getPlayerGroup(member);
         List<String> members = groupManager.getGroupMembers(groupName);
@@ -427,52 +400,96 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     }
 
 
+    // main.java 내부 메서드 교체
+
     private void updateGroupScoreboard(Player player) {
-        ScoreboardManager manager = Bukkit.getScoreboardManager();
-        Scoreboard board = manager.getNewScoreboard();
+        Scoreboard board = player.getScoreboard();
 
-        // 그룹이 있으면 그룹명을, 없으면 기본 타이틀을 표시
-        String groupName = groupManager.getPlayerGroup(player);
-        String title = (groupName != null) ? "§6§l[ " + groupName + " ]" : "§b§l[ 개인 정보 ]";
-
-        Objective obj = board.registerNewObjective("Info", "dummy", title);
-        obj.setDisplaySlot(DisplaySlot.SIDEBAR);
-
-        // 1. 체온 표시 (항상 보임)
-        double temp = tempManager.getTemp(player);
-        String tempColor = (temp >= 38.5) ? "§c" : (temp <= 36.0) ? "§b" : "§f";
-        obj.getScore("§e체온: " + tempColor + temp + "°C").setScore(99);
-
-        // 2. 방사능 표시 (항상 보임)
-        double rad = radManager.getRad(player);
-        String radColor = (rad >= 70) ? "§4" : (rad >= 40) ? "§6" : "§a";
-        obj.getScore("§2방사능: " + radColor + rad + " mSv").setScore(98);
-
-        // 구분선
-        obj.getScore("§7----------------").setScore(97);
-
-        // 3. 그룹 정보 표시 (그룹이 있을 때만 추가)
-        if (groupName != null) {
-            List<String> memberUUIDs = groupManager.getGroupMembers(groupName);
-            int sortValue = 96;
-
-            for (String uuidStr : memberUUIDs) {
-                Player member = Bukkit.getPlayer(UUID.fromString(uuidStr));
-                String displayName;
-                if (member != null && member.isOnline()) {
-                    displayName = "§a" + member.getName();
-                } else {
-                    OfflinePlayer op = Bukkit.getOfflinePlayer(UUID.fromString(uuidStr));
-                    displayName = "§7" + (op.getName() != null ? op.getName() : "Unknown");
-                }
-                obj.getScore(displayName).setScore(sortValue--);
-            }
-        } else {
-            // 그룹이 없을 때 안내 메시지 (선택 사항)
-            obj.getScore("§7가입된 그룹 없음").setScore(96);
+        // 1. 메인 보드면 개별 보드로 전환
+        if (board == Bukkit.getScoreboardManager().getMainScoreboard()) {
+            board = Bukkit.getScoreboardManager().getNewScoreboard();
+            player.setScoreboard(board);
         }
 
-        player.setScoreboard(board);
+        // 2. Objective가 없으면 딱 한 번만 생성 (지우지 않음!)
+        Objective obj = board.getObjective("Info");
+        if (obj == null) {
+            obj = board.registerNewObjective("Info", "dummy", "§6§l[ 정보 ]");
+            obj.setDisplaySlot(DisplaySlot.SIDEBAR);
+            setupPermanentLayout(board, obj); // 고정 틀 잡기
+        }
+
+        // 3. 타이틀(그룹명) 갱신 (지우지 않고 이름만 변경)
+        String groupName = groupManager.getPlayerGroup(player);
+        String title = (groupName != null) ? "§6§l[ " + groupName + " ]" : "§b§l[ 개인 정보 ]";
+        if (!obj.getDisplayName().equals(title)) {
+            obj.setDisplayName(title);
+        }
+
+        // 4. 데이터 갱신 (팀의 Suffix만 변경 - 렉 발생 0%)
+        updateEntryValue(board, "temp", getTempColor(player));
+        updateEntryValue(board, "rad", getRadColor(player));
+    }
+
+    // 최초 1회만 호출되는 틀 설정
+    private void setupPermanentLayout(Scoreboard board, Objective obj) {
+        // 체온 줄
+        Team temp = board.registerNewTeam("temp");
+        temp.addEntry("§e체온: "); // 이 글자를 키값으로 사용
+        obj.getScore("§e체온: ").setScore(99);
+
+        // 방사능 줄
+        Team rad = board.registerNewTeam("rad");
+        rad.addEntry("§2방사능: ");
+        obj.getScore("§2방사능: ").setScore(98);
+
+        // 구분선 (팀 관리 필요 없음)
+        obj.getScore("§7----------------").setScore(97);
+    }
+
+    // 팀의 Suffix만 업데이트
+    private void updateEntryValue(Scoreboard board, String teamName, String value) {
+        Team team = board.getTeam(teamName);
+        if (team != null && !team.getSuffix().equals(value)) {
+            team.setSuffix(value);
+        }
+    }
+    // 최초 1회 레이아웃 설정 (더미 엔트리 등록)
+    private void setupScoreboardLayout(Scoreboard board, Objective obj) {
+        String[] entries = {"§e체온: ", "§2방사능: ", "§7----------------"};
+        int score = 99;
+
+        for (String entry : entries) {
+            // 각 줄을 관리할 팀 생성
+            String teamName = (entry.contains("체온")) ? "temp" : (entry.contains("방사능")) ? "rad" : "line";
+            Team team = board.getTeam(teamName);
+            if (team == null) team = board.registerNewTeam(teamName);
+
+            team.addEntry(entry); // 이 텍스트(엔트리)를 팀이 관리함
+            obj.getScore(entry).setScore(score--);
+        }
+    }
+
+    // 팀의 Prefix만 바꿔서 숫자 갱신
+    private void updateTeamEntry(Scoreboard board, String teamName, String entry, String value) {
+        Team team = board.getTeam(teamName);
+        if (team != null) {
+            team.setPrefix(""); // 초기화
+            team.setSuffix(value); // 값만 변경 (패킷 매우 가벼움)
+        }
+    }
+
+    // 헬퍼 메서드 (가독성용)
+    private String getTempColor(Player p) {
+        double temp = tempManager.getTemp(p);
+        String color = (temp >= 38.5) ? "§c" : (temp <= 36.0) ? "§b" : "§f";
+        return color + temp + "°C";
+    }
+
+    private String getRadColor(Player p) {
+        double rad = radManager.getRad(p);
+        String color = (rad >= 70) ? "§4" : (rad >= 40) ? "§6" : "§a";
+        return color + rad + " mSv";
     }
 
     private void addDefaultSettings() {
@@ -488,7 +505,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         }
         getConfig().addDefault("settings.piston-enabled", true);
         getConfig().options().copyDefaults(true);
-        saveConfig();
     }
 
     @Override
@@ -1048,7 +1064,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             b.setType(Material.AIR);
             world.playSound(b.getLocation(), s, 1.0f, 0.5f);
         }
-        dataStorage.saveConfig(); // 변경사항 저장
     }
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDummyBreak(org.bukkit.event.block.BlockBreakEvent e) {
@@ -1175,7 +1190,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         if (!correctName.equals(savedName) || correctMax != savedMax) {
             dataStorage.getConfig().set(key + ".display_name", correctName);
             dataStorage.getConfig().set(key + ".max_health", correctMax);
-            dataStorage.saveConfig();
         }
 
         // 4. 체력 계산
@@ -1221,7 +1235,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         } else {
             // [중요!] 체력이 남아있는 경우: 블록을 없애면 안 됩니다!
             dataStorage.getConfig().set(key + ".health", newHp); // 줄어든 체력만 저장
-            dataStorage.saveConfig();
 
             if (p != null) {
                 reduceItemDurability(p);
@@ -1267,7 +1280,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
 
             // [데이터] 제거
             dataStorage.getConfig().set(key, null);
-            dataStorage.saveConfig();
 
             // [블록 제거] 핵심: 차고문인지 일반 문인지 판별해서 지우기
             if (typeName.contains("BIG_DOOR")) {
@@ -1290,7 +1302,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         } else {
             // [수정] dataStorage 체력 업데이트
             dataStorage.getConfig().set(key + ".health", newHp);
-            dataStorage.saveConfig();
 
             // --- [소리 및 효과 로직 수정] ---
             // 1. 금속 재질(IRON, ARMORED, BIG)인 경우에만 커스텀 사운드 재생
@@ -1567,23 +1578,19 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         }
     }
     public void sendMaintenancePacket(Player player, boolean isDecaying, String costStr) {
-        if (!getServer().getMessenger().getOutgoingChannels(this).contains("examplemod:messages")) {
-            return;
-        }
         try {
             java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
             java.io.DataOutputStream out = new java.io.DataOutputStream(b);
-            out.writeByte(6);
+
+            out.writeByte(6); // 패킷 ID
             out.writeBoolean(isDecaying);
 
             byte[] strBytes = costStr.getBytes(java.nio.charset.StandardCharsets.UTF_8);
             writeVarInt(out, strBytes.length);
             out.write(strBytes);
 
-            player.sendPluginMessage(this, "examplemod:messages", b.toByteArray());
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+            player.sendPluginMessage(this, "examplemod:main", b.toByteArray());
+        } catch (Exception e) { e.printStackTrace(); }
     }
     private void writeVarInt(java.io.DataOutputStream out, int value) throws java.io.IOException {
         while ((value & -128) != 0) {
@@ -1592,7 +1599,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         }
         out.writeByte(value);
     }
-    // main.java 클래스 안에 추가하세요
     public Location keyToLocation(String key) {
         try {
             String[] parts = key.split("_");
@@ -1609,6 +1615,10 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         } catch (Exception e) {
             return null;
         }
+    }
+    @Override
+    public ChunkGenerator getDefaultWorldGenerator(String worldName, String id) {
+        return new VoidGenerator();
     }
 }
 

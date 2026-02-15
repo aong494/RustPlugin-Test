@@ -11,6 +11,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
@@ -41,7 +42,21 @@ public class BedManager implements Listener, CommandExecutor {
         this.plugin = plugin;
         startUpdateTask();
     }
+    public void sendBedLocationsToClient(Player player) {
+        List<String> beds = plugin.getConfig().getStringList("player_beds." + player.getUniqueId());
+        String activeBed = plugin.getConfig().getString("active_bed." + player.getUniqueId());
 
+        // 형식: "world,x,y,z|world,x,y,z|active:world,x,y,z"
+        StringBuilder sb = new StringBuilder();
+        for (String loc : beds) {
+            if (sb.length() > 0) sb.append("|");
+            sb.append(loc);
+        }
+        sb.append("|active:").append(activeBed != null ? activeBed : "none");
+
+        // "rust:bed_data" 채널로 데이터 전송 (메인 클래스에서 채널 등록 필요)
+        player.sendPluginMessage(plugin, "rust:bed_data", sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
     private String getProgressBar(double current, double max) {
         int bars = 10;
         int completedBars = (int) ((current / max) * bars);
@@ -244,18 +259,33 @@ public class BedManager implements Listener, CommandExecutor {
     @EventHandler
     public void onBedPlace(BlockPlaceEvent e) {
         if (!e.getBlock().getType().name().contains("_BED")) return;
+
+        // [추가] 왼손/오른손 중복 호출 방지 (Main Hand일 때만 실행)
+        if (e.getHand() == org.bukkit.inventory.EquipmentSlot.OFF_HAND) return;
+
         Player p = e.getPlayer();
         List<String> beds = plugin.getConfig().getStringList("player_beds." + p.getUniqueId());
+
         if (beds.size() >= MAX_BEDS) {
             e.setCancelled(true);
             p.sendMessage("§c[Bed] 최대 4개까지만 설치 가능합니다.");
             return;
         }
+
+        // [중요] 이미 통합 좌표(발치)를 가져오는 getBedBaseLocation이 있으므로
+        // 해당 좌표가 이미 리스트에 있는지 검사합니다.
         Location baseLoc = getBedBaseLocation(e.getBlock());
         String locStr = locationToString(baseLoc);
+
+        if (beds.contains(locStr)) return; // 이미 등록된 좌표라면 중단
+
         beds.add(locStr);
         plugin.getConfig().set("player_beds." + p.getUniqueId(), beds);
-        if (beds.size() == 1) plugin.getConfig().set("active_bed." + p.getUniqueId(), locStr);
+
+        if (beds.size() == 1) {
+            plugin.getConfig().set("active_bed." + p.getUniqueId(), locStr);
+        }
+
         plugin.saveConfig();
         bedHealthMap.put(locStr, MAX_BED_HEALTH);
     }
@@ -363,25 +393,32 @@ public class BedManager implements Listener, CommandExecutor {
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST) // 우선순위를 최상으로 올림
     public void onRespawn(PlayerRespawnEvent e) {
         Player p = e.getPlayer();
         String activeBedLoc = plugin.getConfig().getString("active_bed." + p.getUniqueId());
+
         if (activeBedLoc != null) {
             long lastUse = plugin.getConfig().getLong("bed_cooldown." + activeBedLoc.replace(",", "_"), 0);
-            if (System.currentTimeMillis() - lastUse < COOLDOWN_MS) {
-                p.sendMessage("§c[Bed] 침대가 쿨타임 중입니다.");
+            long now = System.currentTimeMillis();
+
+            if (now - lastUse < COOLDOWN_MS) {
+                p.sendMessage("§c[Bed] 침대가 재충전 중입니다. (" + ((COOLDOWN_MS - (now - lastUse)) / 1000) + "초 남음)");
             } else {
                 Location loc = stringToLocation(activeBedLoc);
                 if (loc != null && loc.getBlock().getType().name().contains("_BED")) {
-                    e.setRespawnLocation(loc.add(0.5, 1.0, 0.5));
+                    // 블록 정중앙 위쪽(y+1.2)으로 설정하여 끼임 방지
+                    Location respawnLoc = loc.clone().add(0.5, 1.2, 0.5);
+                    e.setRespawnLocation(respawnLoc);
+
+                    // 쿨타임 및 메시지
                     plugin.getConfig().set("bed_cooldown." + activeBedLoc.replace(",", "_"), System.currentTimeMillis());
                     plugin.saveConfig();
+                    p.sendMessage("§a[Bed] 침대에서 부활했습니다.");
                 }
             }
         }
     }
-
     private String locationToString(Location loc) {
         return loc.getWorld().getName() + "," + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ();
     }
@@ -390,6 +427,8 @@ public class BedManager implements Listener, CommandExecutor {
         try {
             String[] p = s.split(",");
             return new Location(Bukkit.getWorld(p[0]), Double.parseDouble(p[1]), Double.parseDouble(p[2]), Double.parseDouble(p[3]));
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

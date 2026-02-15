@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="d4dfb11b-a86f-426b-a21f-888c6c204710" name="변경" comment="">
+      <change afterPath="$PROJECT_DIR$/src/main/java/Alpa/test/DeadManager.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/Alpa/test/VoidGenerator.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/dead.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/8.8/checksums/checksums.lock" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/8.8/checksums/checksums.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/8.8/checksums/sha1-checksums.bin" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/8.8/checksums/sha1-checksums.bin" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/8.8/executionHistory/executionHistory.bin" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/8.8/executionHistory/executionHistory.bin" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/8.8/executionHistory/executionHistory.lock" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/8.8/executionHistory/executionHistory.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/8.8/fileHashes/fileHashes.bin" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/8.8/fileHashes/fileHashes.bin" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/8.8/fileHashes/fileHashes.lock" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/8.8/fileHashes/fileHashes.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/8.8/fileHashes/resourceHashesCache.bin" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/8.8/fileHashes/resourceHashesCache.bin" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/buildOutputCleanup/buildOutputCleanup.lock" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/buildOutputCleanup/buildOutputCleanup.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/buildOutputCleanup/cache.properties" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/buildOutputCleanup/cache.properties" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/buildOutputCleanup/outputFiles.bin" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/buildOutputCleanup/outputFiles.bin" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gradle/file-system.probe" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/file-system.probe" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build.gradle" beforeDir="false" afterPath="$PROJECT_DIR$/build.gradle" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BedManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BedManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BedManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BedManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlockDecayManager$1.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlockDecayManager$MaintenanceResult.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlockDecayManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlockDecayManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlockDrops.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlockDrops.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlockListener.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlockListener.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlockRegenManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlockRegenManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlueprintManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlueprintManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlueprintManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/BlueprintManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CardKeyCommand.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CardKeyCommand.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CardKeyListener$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CardKeyListener$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CardKeyListener.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CardKeyListener.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CardKeyManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CardKeyManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CraftManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CraftManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CraftManager$2.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CraftManager$2.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CraftManager$3.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CraftManager$3.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CraftManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/CraftManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/DoorManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/DoorManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/DoorManager$2.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/DoorManager$2.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/DoorManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/DoorManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager$2.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager$2.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager$3.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager$3.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager$CompType.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager$CompType.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager$ElectricComponent.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager$ElectricComponent.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ElectricManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/GroupManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/GroupManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/HologramManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/HologramManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/InteractBlockListener.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/InteractBlockListener.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/InteractBlockManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/InteractBlockManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/OilRefineryManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/OilRefineryManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/OilRefineryManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/OilRefineryManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/PlankHealthManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/PlankHealthManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/PlankRepairManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/PlankRepairManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/PlankToIronManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/PlankToIronManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RadiationManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RadiationManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidListener.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidListener.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$RaidInstance$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$RaidInstance$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$RaidInstance$2.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$RaidInstance$2.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$RaidInstance$3.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$RaidInstance$3.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$RaidInstance.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$RaidInstance.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$RaidState.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager$RaidState.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RaidManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ReinforcedManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/ReinforcedManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RespawnManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RespawnManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RouletteListener.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RouletteListener.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RouletteManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RouletteManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RouletteManager$2.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RouletteManager$2.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RouletteManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/RouletteManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/TemperatureManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/TemperatureManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/TurretManager$1$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/TurretManager$1$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/TurretManager$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/TurretManager$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/TurretManager.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/TurretManager.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/main$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/main$1.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/main$2.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/main$2.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/main.class" beforeDir="false" afterPath="$PROJECT_DIR$/build/classes/java/main/Alpa/test/main.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/libs/Test-1.0-test.jar" beforeDir="false" afterPath="$PROJECT_DIR$/build/libs/Test-1.0-test.jar" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/resources/main/plugin.yml" beforeDir="false" afterPath="$PROJECT_DIR$/build/resources/main/plugin.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BedManager$1.class.uniqueId16" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BedManager.class.uniqueId42" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BlockDecayManager$1.class.uniqueId26" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BlockDecayManager$MaintenanceResult.class.uniqueId58" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BlockDecayManager.class.uniqueId60" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BlockDrops.class.uniqueId46" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BlockListener.class.uniqueId29" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BlockRegenManager$TreeData.class.uniqueId53" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BlockRegenManager.class.uniqueId61" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BlueprintManager$1.class.uniqueId63" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BlueprintManager$2.class.uniqueId19" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/BlueprintManager.class.uniqueId27" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/CardKeyCommand.class.uniqueId20" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/CardKeyListener$1.class.uniqueId40" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/CardKeyListener.class.uniqueId13" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/CardKeyManager.class.uniqueId22" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/CraftManager$1.class.uniqueId47" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/CraftManager$2.class.uniqueId4" beforeDir="false" afterPath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/CraftManager$2.class.uniqueId4" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/CraftManager$3.class.uniqueId43" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/CraftManager$4.class.uniqueId56" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/CraftManager.class.uniqueId25" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/DataManager.class.uniqueId65" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/DoorManager$1.class.uniqueId64" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/DoorManager$2.class.uniqueId17" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/DoorManager$3.class.uniqueId33" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/DoorManager.class.uniqueId3" beforeDir="false" afterPath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/DoorManager.class.uniqueId3" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/ElectricManager$1.class.uniqueId0" beforeDir="false" afterPath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/ElectricManager$1.class.uniqueId0" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/ElectricManager$2.class.uniqueId49" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/ElectricManager$3.class.uniqueId34" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/ElectricManager$CompType.class.uniqueId23" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/ElectricManager$ElectricComponent.class.uniqueId36" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/ElectricManager.class.uniqueId69" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/EnvironmentManager.class.uniqueId51" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/GroupManager.class.uniqueId52" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/HologramManager$1.class.uniqueId57" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/HologramManager.class.uniqueId10" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/InteractBlockListener.class.uniqueId18" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/InteractBlockManager.class.uniqueId54" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/JoinManager.class.uniqueId24" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/OilRefineryManager$1.class.uniqueId12" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/OilRefineryManager.class.uniqueId6" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/PlankHealthManager.class.uniqueId62" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/PlankRepairManager.class.uniqueId59" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/PlankToIronManager.class.uniqueId2" beforeDir="false" afterPath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/PlankToIronManager.class.uniqueId2" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RadiationManager$1.class.uniqueId35" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RadiationManager.class.uniqueId21" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RaidListener$1.class.uniqueId41" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RaidListener.class.uniqueId31" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RaidManager$1.class.uniqueId70" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RaidManager$RaidInstance$1.class.uniqueId67" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RaidManager$RaidInstance$2.class.uniqueId11" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RaidManager$RaidInstance$3.class.uniqueId28" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RaidManager$RaidInstance.class.uniqueId15" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RaidManager$RaidState.class.uniqueId44" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RaidManager.class.uniqueId48" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/ReinforcedManager.class.uniqueId37" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RespawnManager.class.uniqueId66" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RouletteListener.class.uniqueId68" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RouletteManager$1.class.uniqueId50" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RouletteManager$2.class.uniqueId30" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/RouletteManager.class.uniqueId8" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/TemperatureManager$1.class.uniqueId39" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/TemperatureManager.class.uniqueId38" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/TurretManager$1$1.class.uniqueId45" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/TurretManager$1.class.uniqueId55" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/TurretManager.class.uniqueId14" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/main$1.class.uniqueId9" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/main$2.class.uniqueId32" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/compileTransaction/stash-dir/main.class.uniqueId7" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/build/tmp/compileJava/previous-compilation-data.bin" beforeDir="false" afterPath="$PROJECT_DIR$/build/tmp/compileJava/previous-compilation-data.bin" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/gradle/wrapper/gradle-wrapper.jar" beforeDir="false" afterPath="$PROJECT_DIR$/gradle/wrapper/gradle-wrapper.jar" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/gradle/wrapper/gradle-wrapper.properties" beforeDir="false" afterPath="$PROJECT_DIR$/gradle/wrapper/gradle-wrapper.properties" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/gradlew" beforeDir="false" afterPath="$PROJECT_DIR$/gradlew" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/gradlew.bat" beforeDir="false" afterPath="$PROJECT_DIR$/gradlew.bat" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/Alpa/test/BedManager.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/Alpa/test/BedManager.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/Alpa/test/BlockDecayManager.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/Alpa/test/BlockDecayManager.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/Alpa/test/BlockListener.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/Alpa/test/BlockListener.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/Alpa/test/main.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/Alpa/test/main.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/resources/plugin.yml" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/resources/plugin.yml" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ExternalProjectsData">
+    <projectState path="$PROJECT_DIR$">
+      <ProjectState />
+    </projectState>
+  </component>
+  <component name="ExternalProjectsManager">
+    <system id="GRADLE">
+      <state>
+        <task path="$PROJECT_DIR$">
+          <activation />
+        </task>
+        <projects_view>
+          <tree_state>
+            <expand>
+              <path>
+                <item name="" type="6a2764b6:ExternalProjectsStructure$RootNode" />
+                <item name="Test" type="f1a62948:ProjectNode" />
+              </path>
+              <path>
+                <item name="" type="6a2764b6:ExternalProjectsStructure$RootNode" />
+                <item name="Test" type="f1a62948:ProjectNode" />
+                <item name="Tasks" type="e4a08cd1:TasksNode" />
+              </path>
+              <path>
+                <item name="" type="6a2764b6:ExternalProjectsStructure$RootNode" />
+                <item name="Test" type="f1a62948:ProjectNode" />
+                <item name="Tasks" type="e4a08cd1:TasksNode" />
+                <item name="build" type="c8890929:TasksNode$1" />
+              </path>
+              <path>
+                <item name="" type="6a2764b6:ExternalProjectsStructure$RootNode" />
+                <item name="Test" type="f1a62948:ProjectNode" />
+                <item name="Dependencies" type="6de06a37:ExternalSystemViewDefaultContributor$MyDependenciesNode" />
+              </path>
+            </expand>
+            <select />
+          </tree_state>
+        </projects_view>
+      </state>
+    </system>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProblemsViewState">
+    <option name="selectedTabId" value="CurrentFile" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 8
+}</component>
+  <component name="ProjectId" id="39dDs1fX8XPATDAifyYpeUlLOEO" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Gradle.Test [build].executor&quot;: &quot;Run&quot;,
+    &quot;Gradle.Test.executor&quot;: &quot;Run&quot;,
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;
+  }
+}</component>
+  <component name="RunManager" selected="Gradle.Test [build]">
+    <configuration name="Test [build]" type="GradleRunConfiguration" factoryName="Gradle" temporary="true">
+      <ExternalSystemSettings>
+        <option name="executionName" />
+        <option name="externalProjectPath" value="$PROJECT_DIR$" />
+        <option name="externalSystemIdString" value="GRADLE" />
+        <option name="scriptParameters" />
+        <option name="taskDescriptions">
+          <list />
+        </option>
+        <option name="taskNames">
+          <list>
+            <option value="build" />
+          </list>
+        </option>
+        <option name="vmOptions" />
+      </ExternalSystemSettings>
+      <ExternalSystemDebugServerProcess>true</ExternalSystemDebugServerProcess>
+      <ExternalSystemReattachDebugProcess>true</ExternalSystemReattachDebugProcess>
+      <ExternalSystemDebugDisabled>false</ExternalSystemDebugDisabled>
+      <DebugAllEnabled>false</DebugAllEnabled>
+      <RunAsTest>false</RunAsTest>
+      <GradleProfilingDisabled>false</GradleProfilingDisabled>
+      <GradleCoverageDisabled>false</GradleCoverageDisabled>
+      <method v="2" />
+    </configuration>
+    <configuration name="Test" type="GradleRunConfiguration" factoryName="Gradle" temporary="true">
+      <ExternalSystemSettings>
+        <option name="executionName" />
+        <option name="externalProjectPath" value="$PROJECT_DIR$" />
+        <option name="externalSystemIdString" value="GRADLE" />
+        <option name="scriptParameters" />
+        <option name="taskDescriptions">
+          <list />
+        </option>
+        <option name="taskNames">
+          <list />
+        </option>
+        <option name="vmOptions" />
+      </ExternalSystemSettings>
+      <ExternalSystemDebugServerProcess>true</ExternalSystemDebugServerProcess>
+      <ExternalSystemReattachDebugProcess>true</ExternalSystemReattachDebugProcess>
+      <ExternalSystemDebugDisabled>false</ExternalSystemDebugDisabled>
+      <DebugAllEnabled>false</DebugAllEnabled>
+      <RunAsTest>false</RunAsTest>
+      <GradleProfilingDisabled>false</GradleProfilingDisabled>
+      <GradleCoverageDisabled>false</GradleCoverageDisabled>
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Gradle.Test [build]" />
+        <item itemvalue="Gradle.Test" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-jdk-30f59d01ecdd-26cb7f24e5b0-intellij.indexing.shared.core-IU-253.29346.138" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="디폴트 작업">
+      <changelist id="d4dfb11b-a86f-426b-a21f-888c6c204710" name="변경" comment="" />
+      <created>1771017258121</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1771017258121</updated>
+    </task>
+    <servers />
+  </component>
+</project>

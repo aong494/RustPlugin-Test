@@ -466,4 +466,17 @@ public class BlockListener implements Listener {
             }, 1L);
         }
     }
+    @EventHandler
+    public void onCupboardInteract(PlayerInteractEvent event) {
+        if (event.getClickedBlock() == null) return;
+
+        // 클릭한 블록이 도구함인지 확인 (모드 블록 이름에 맞춰 수정)
+        if (event.getClickedBlock().getType().name().contains("TOOL_CUPBOARD")) {
+            Player player = event.getPlayer();
+            Location cupLoc = event.getClickedBlock().getLocation();
+
+            // [핵심] 여기서 계산기(BlockDecayManager)를 호출하여 정보를 전송합니다.
+            plugin.blockDecayManager.syncMaintenanceToPlayer(player, cupLoc);
+        }
+    }
 }
