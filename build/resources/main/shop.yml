@@ -1,0 +1,19 @@
+shops:
+  minerals: # 상점 ID (열 때 사용)
+    title: "§8[ 광물 상점 ]"
+    items:
+      '0': # 첫 번째 줄
+        item: "minecraft:diamond"
+        price_item: "minecraft:gold_ingot"
+        price_amount: 5
+      '1': # 두 번째 줄
+        item: "minecraft:iron_ingot"
+        price_item: "minecraft:coal"
+        price_amount: 10
+  horse:
+    title: "§8[ 말 상점 ]"
+    items:
+      '0':
+        item: "minecraft:horse_spawn_egg"
+        price_item: "jeg:scrap"
+        price_amount: 3

@@ -120,7 +120,7 @@ public class DeadManager implements Listener {
         Player player = event.getPlayer();
         String uuidString = player.getUniqueId().toString();
 
-        // 1. NPC 제거 (기존 로직 동일)
+        // 1. NPC 제거 로직 (기본 유지)
         List<NPC> toRemove = new ArrayList<>();
         CitizensAPI.getNPCRegistry().forEach(npc -> {
             Object data = npc.data().get("owner-uuid");
@@ -129,36 +129,38 @@ public class DeadManager implements Listener {
             }
         });
         for (NPC npc : toRemove) { npc.destroy(); }
+
         // 2. 오프라인 사망 처리 로직
         if (config.getBoolean("pending-deaths." + uuidString)) {
-            // 인벤토리 비우기
             player.getInventory().clear();
 
-            // 1틱 뒤에 처리 (위치 선점을 위해)
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                // "이미 죽은 상태"로 간주하고 침대나 랜덤 스폰으로 보냄
                 Location spawnLoc = null;
 
-                // [BedManager 연동] 침대 좌표 확인
+                // [수정] 무작위 부활을 기본 정책으로 하거나, 침대 존재 여부를 더 확실히 체크
                 String activeBedLoc = plugin.getConfig().getString("active_bed." + uuidString);
+
                 if (activeBedLoc != null) {
-                    // 침대 클래스에서 사용하는 좌표 변환 메서드 활용 (BedManager에 public으로 선언되어 있어야 함)
-                    spawnLoc = stringToLocation(activeBedLoc);
+                    Location bedLoc = stringToLocation(activeBedLoc);
+                    // 실제로 그 위치에 침대 블록이 있는지 확인 (매우 중요)
+                    if (bedLoc != null && bedLoc.getBlock().getType().name().contains("_BED")) {
+                        spawnLoc = bedLoc.add(0.5, 1.2, 0.5);
+                    }
                 }
 
-                // 침대가 없으면 랜덤 스폰
-                if (spawnLoc == null || spawnLoc.getBlock().getType() == Material.AIR) {
+                // 침대가 없거나 블록이 사라졌다면 랜덤 스폰
+                if (spawnLoc == null) {
                     spawnLoc = plugin.respawnManager.getSafeRandomLocation();
-                    player.sendMessage(ChatColor.RED + "오프라인 도중 NPC가 살해당했습니다. 랜덤 지역에서 부활합니다.");
-                } else {
-                    player.sendMessage(ChatColor.GREEN + "오프라인 도중 NPC가 살해당했습니다. 침대에서 부활합니다.");
                 }
 
                 // 위치 이동 및 상태 초기화
                 if (spawnLoc != null) {
-                    player.teleport(spawnLoc.add(0.5, 1, 0.5));
+                    player.teleport(spawnLoc);
                 }
-                player.setHealth(player.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue());
+
+                // 체력 및 허기 초기화
+                double maxHealth = player.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue();
+                player.setHealth(maxHealth);
                 player.setFoodLevel(20);
 
                 // 데이터 정리
@@ -405,8 +407,12 @@ public class DeadManager implements Listener {
 
     private void executeDeath(Player player) {
         cleanup(player);
-        plugin.bedManager.sendBedLocationsToClient(player);
-        player.setHealth(0);
+        plugin.bedManager.syncAllBedsToClient(player);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline()) {
+                player.setHealth(0); // 실제 사망 발생 -> 클라이언트 CustomDeathScreen 오픈
+            }
+        }, 1L);
     }
     private void cleanup(Player player) {
         UUID uuid = player.getUniqueId();

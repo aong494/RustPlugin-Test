@@ -44,7 +44,7 @@ import com.google.gson.*;
 import com.google.gson.reflect.TypeToken;
 
 
-public final class main extends JavaPlugin implements Listener, CommandExecutor {
+public final class main extends JavaPlugin implements Listener {
 
     private CraftManager craftManager;
     public BedManager bedManager;
@@ -84,12 +84,14 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     public PlankToIronManager plankToIronManager;
     public JoinManager joinManager;
     public EnvironmentManager environmentManager;
-    public RespawnListener respawnListener;
     public InteractBlockListener interactBlockListener;
     public BlockDrops blockDrops;
     public MobListener mobListener;
     public FurnaceListener furnaceListener;
     public DeadManager deadManager;
+    public ShopManager shopManager;
+    public FileConfiguration shopConfig;
+    private File shopFile;
 
     @Override
         public void onEnable() {
@@ -118,6 +120,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             if (!maintenanceFile.exists()) saveResource("maintenance.yml", false);
             maintenanceConfig = YamlConfiguration.loadConfiguration(maintenanceFile);
             OilRefineryManager refineryManager = new OilRefineryManager(this);
+            MainCommandExecutor mainExecutor = new MainCommandExecutor(this);
             this.blueprintManager = new BlueprintManager(this);
             this.reinforcedManager = new ReinforcedManager(this);
             this.hologramManager = new HologramManager(this);
@@ -127,7 +130,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             this.plankToIronManager = new PlankToIronManager(this);
             this.joinManager = new JoinManager(this);
             this.environmentManager = new EnvironmentManager(this);
-            this.respawnListener = new RespawnListener(this);
             this.interactBlockListener = new InteractBlockListener(this);
             this.blockDrops = new BlockDrops(this);
             this.mobListener = new MobListener();
@@ -136,7 +138,7 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
             this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:main");
             this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:messages");
             this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:group_data");
-            this.getServer().getMessenger().registerOutgoingPluginChannel(this, "rust:bed_data");
+            this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:bed_data");
 
             addDefaultSettings();
         org.bukkit.plugin.PluginManager pm = getServer().getPluginManager();
@@ -151,7 +153,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         pm.registerEvents(this.joinManager, this);
         pm.registerEvents(this.environmentManager, this);
         pm.registerEvents(this.reinforcedManager,this);
-        pm.registerEvents(this.respawnListener, this);
         pm.registerEvents(this.interactBlockListener, this);
         pm.registerEvents(this.blockListener, this);
         pm.registerEvents(new RaidListener(this), this);
@@ -188,10 +189,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
                 getLogger().severe("파일 생성 중 오류 발생: " + e.getMessage());
             }
         }
-        if (getCommand("스포너설정") != null) getCommand("스포너설정").setExecutor(this);
-
-        getCommand("보온설정").setExecutor(this);
-
         // config 설정 로직
         if (!getConfig().contains("decay-settings.interval-seconds")) {
             getConfig().set("decay-settings.interval-seconds", 10);
@@ -200,17 +197,35 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         long intervalSeconds = getConfig().getLong("decay-settings.interval-seconds", 3600L);
         this.blockDecayManager.runTaskTimer(this, intervalSeconds * 20L, intervalSeconds * 20L);
 
-        // 명령어 등록
-        if (getCommand("그룹") != null) getCommand("그룹").setExecutor(this);
+        // 1. 통합 관리자가 처리할 명령어들
+        String[] mainCommands = {"스포너설정", "보온설정", "방호설정", "스폰설정", "그룹", "레이드박스", "상점", "상점등록", "상점삭제"};
+        for (String cmd : mainCommands) {
+            if (getCommand(cmd) != null) getCommand(cmd).setExecutor(mainExecutor);
+        }
+
+        // 2. 이미 별도 클래스가 있는 명령어들
         if (getCommand("침대") != null) getCommand("침대").setExecutor(this.bedManager);
+        if (getCommand("bedrespawn") != null) getCommand("bedrespawn").setExecutor(this.bedManager);
+        if (getCommand("카드키") != null) getCommand("카드키").setExecutor(new CardKeyCommand(cardKeyManager));
+
         if (getCommand("제작") != null) {
             getCommand("제작").setExecutor((sender, command, label, args) -> {
-                if (sender instanceof Player) {
-                    craftManager.openDefaultCrafting((Player) sender);
-                }
+                if (sender instanceof Player) craftManager.openDefaultCrafting((Player) sender);
                 return true;
             });
         }
+        this.shopFile = new File(getDataFolder(), "shop.yml");
+
+        // 2. 물리적 파일 존재 확인 및 기본 리소스 저장
+        if (!this.shopFile.exists()) {
+            this.saveResource("shop.yml", false);
+        }
+        this.shopConfig = YamlConfiguration.loadConfiguration(shopFile);
+        this.shopManager = new ShopManager(this);
+        this.getServer().getMessenger().registerOutgoingPluginChannel(this, "examplemod:shop_data");
+        this.getServer().getMessenger().registerIncomingPluginChannel(this, "examplemod:shop_data", this.shopManager);
+        this.shopManager.loadAllShops();
+
         // 스코어보드 업데이트 스케줄러
         Bukkit.getScheduler().runTaskTimer(this, () -> {
             for (Player player : Bukkit.getOnlinePlayers()) {
@@ -240,7 +255,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         });
         getServer().getScheduler().runTaskLater(this, () -> {
             deadManager.restoreNPCAnimations();
-            getLogger().info("[Rust] 모든 로그아웃 NPC의 애니메이션을 복구했습니다.");
         }, 60L);
     }
     public void createVoidWorld(String name) {
@@ -248,6 +262,53 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         creator.generator(new VoidGenerator()); // 우리가 만든 생성기 강제 지정
         creator.generateStructures(false);
         Bukkit.createWorld(creator);
+    }
+    private void handleShopIncomingPacket(Player player, byte[] message) {
+        try {
+            String data = new String(message, "UTF-8");
+            // 데이터 형식: "BUY:1:5" (액션:상품ID:수량)
+            String[] parts = data.split(":");
+
+            if (parts[0].equals("BUY")) {
+                int shopId = Integer.parseInt(parts[1]);
+                int amount = Integer.parseInt(parts[2]);
+
+                // 여기서 실제 상점 거래 로직 수행
+                processShopTransaction(player, shopId, amount);
+            }
+        } catch (Exception e) {
+            getLogger().warning("상점 패킷 처리 중 오류: " + e.getMessage());
+        }
+    }
+
+    private void processShopTransaction(Player player, int shopId, int amount) {
+        // [예시 로직] 실제 서버의 경제 시스템이나 아이템 가격에 맞게 수정하세요.
+        Material currency = Material.EMERALD; // 화폐: 에메랄드
+        int pricePerOne = 10; // 개당 가격
+        int totalPrice = pricePerOne * amount;
+
+        if (player.getInventory().contains(currency, totalPrice)) {
+            // 1. 비용 차감
+            player.getInventory().removeItem(new ItemStack(currency, totalPrice));
+
+            // 2. 상품 지급 (예: 1번 상품이 철괴라면)
+            if (shopId == 1) {
+                player.getInventory().addItem(new ItemStack(Material.IRON_INGOT, amount));
+            }
+
+            player.sendMessage("§a[Shop] §f구매가 완료되었습니다!");
+
+            // 3. (선택) 클라이언트에 성공 패킷 전송
+            sendShopResponse(player, "SUCCESS");
+        } else {
+            player.sendMessage("§c[Shop] §f잔액이 부족합니다.");
+            sendShopResponse(player, "FAIL");
+        }
+    }
+
+    // 서버에서 클라이언트로 상점 관련 알림을 보낼 때 사용
+    public void sendShopResponse(Player player, String response) {
+        player.sendPluginMessage(this, "examplemod:shop_data", response.getBytes());
     }
     private void handleIncomingPacket(Player player, byte[] message) {
         ByteArrayDataInput in = ByteStreams.newDataInput(message);
@@ -506,285 +567,6 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         getConfig().addDefault("settings.piston-enabled", true);
         getConfig().options().copyDefaults(true);
     }
-
-    @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player player)) return false;
-        if (label.equalsIgnoreCase("스포너설정")) {
-            if (!player.isOp()) return true;
-            if (args.length < 2) {
-                player.sendMessage("§c사용법: /스포너설정 <이름> <재소환시간(초)>");
-                return true;
-            }
-
-            String mobName = args[0];
-            int interval;
-            try {
-                interval = Integer.parseInt(args[1]);
-            } catch (NumberFormatException e) {
-                player.sendMessage("§c[System] 시간은 숫자로 입력해주세요.");
-                return true;
-            }
-
-            Location l = player.getLocation();
-            File file = new File(getDataFolder(), "custom_spawners.json");
-            Map<String, Object> config = new HashMap<>();
-
-            // 1. 기존 데이터 읽기 (안전한 방식)
-            if (file.exists() && file.length() > 0) {
-                try (Reader reader = new FileReader(file)) {
-                    Map<String, Object> tempConfig = new Gson().fromJson(reader, new TypeToken<Map<String, Object>>(){}.getType());
-                    if (tempConfig != null) {
-                        config = tempConfig;
-                    }
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-
-            // 2. 해당 이름의 몹 섹션이 없으면 기본 정보 생성
-            if (!config.containsKey(mobName)) {
-                Map<String, Object> mobInfo = new HashMap<>();
-                mobInfo.put("type", "husk"); // 소문자로 변경
-                mobInfo.put("hp", 40);
-                mobInfo.put("speed", 0.1);
-                mobInfo.put("weapon", "jeg:assault_rifle".toLowerCase()); // 소문자로 저장
-
-                Map<String, String> armor = new HashMap<>();
-                armor.put("helmet", "lrarmor:defender_helmet".toLowerCase());
-                armor.put("chestplate", "lrarmor:defender_chestplate".toLowerCase());
-                armor.put("leggings", "lrarmor:defender_leggings".toLowerCase());
-                armor.put("boots", "lrarmor:defender_boots".toLowerCase());
-                mobInfo.put("armor", armor);
-
-                List<Map<String, Object>> drops = new ArrayList<>();
-                Map<String, Object> drop1 = new HashMap<>();
-                drop1.put("item", "jeg:rifle_ammo");
-                drop1.put("chance", 100);
-                drop1.put("amount", 1);
-                drops.add(drop1);
-                mobInfo.put("custom-drops", drops);
-
-                mobInfo.put("spawns", new ArrayList<Map<String, Object>>());
-                config.put(mobName, mobInfo);
-            }
-
-            // 3. 데이터 캐스팅 및 좌표 추가
-            Map<String, Object> mobInfo = (Map<String, Object>) config.get(mobName);
-            List<Map<String, Object>> spawnList = (List<Map<String, Object>>) mobInfo.get("spawns");
-
-            Map<String, Object> newSpawn = new HashMap<>();
-            newSpawn.put("id", (mobName + "_" + (spawnList.size() + 1)).toLowerCase());
-            newSpawn.put("interval", interval);
-            newSpawn.put("x", Math.round(l.getX() * 100.0) / 100.0);
-            newSpawn.put("y", Math.round(l.getY() * 100.0) / 100.0);
-            newSpawn.put("z", Math.round(l.getZ() * 100.0) / 100.0);
-            spawnList.add(newSpawn);
-
-            // 4. 저장
-            try (Writer writer = new FileWriter(file)) {
-                new GsonBuilder().setPrettyPrinting().create().toJson(config, writer);
-                player.sendMessage("§a[System] §f" + mobName + " 좌표 등록 완료!");
-            } catch (IOException e) { e.printStackTrace(); }
-            return true;
-        }
-        if (label.equalsIgnoreCase("레이드박스")) {
-            if (!player.isOp()) {
-                player.sendMessage("§c[System] 관리자 전용 명령어입니다.");
-                return true;
-            }
-
-            if (args.length < 2) {
-                player.sendMessage("§c사용법: /레이드박스 <설치|확인|삭제|드랍템|장비> <이름>");
-                return true;
-            }
-
-            String action = args[0];
-            String raidName = args[1];
-
-            if (action.equalsIgnoreCase("설치")) {
-                Location loc = player.getLocation().getBlock().getLocation();
-                if (this.raidManager.getConfig().contains("raidboxes." + raidName)) {
-                    this.raidManager.createInstance(loc, raidName);
-                    player.sendMessage("§a[Raid] §f" + raidName + " 레이드 박스를 설치했습니다.");
-                } else {
-                    player.sendMessage("§c[System] raidbox.yml에 '" + raidName + "' 정보가 없습니다.");
-                }
-            }
-            else if (action.equalsIgnoreCase("확인")) {
-                org.bukkit.block.Block targetBlock = player.getTargetBlock(null, 5);
-                RaidManager.RaidInstance instance = this.raidManager.getInstance(targetBlock.getLocation());
-
-                if (instance != null) {
-                    player.sendMessage("§6--- [" + instance.getTemplateName() + "] 정보 ---");
-                    player.sendMessage("§f상태: §e" + instance.getState());
-                    if (instance.getState() == RaidManager.RaidState.RUNNING) {
-                        player.sendMessage("§c남은 시간: §f" + instance.getTimeLeft() + "초");
-                    } else if (instance.getState() == RaidManager.RaidState.COOLDOWN) {
-                        player.sendMessage("§b남은 쿨타임: §f" + instance.getCooldownRemain() + "초");
-                    }
-                } else {
-                    player.sendMessage("§c[System] 바라보고 있는 위치에 설치된 레이드 박스가 없습니다.");
-                }
-            }
-            else if (action.equalsIgnoreCase("삭제")) {
-                if (this.raidManager.removeInstance(raidName)) {
-                    player.sendMessage("§e[Raid] " + raidName + " 레이드 박스를 월드에서 삭제했습니다.");
-                } else {
-                    player.sendMessage("§c[Raid] 해당 이름으로 설치된 박스를 찾을 수 없습니다.");
-                }
-            }
-            else if (action.equalsIgnoreCase("드랍템")) {
-                if (args.length < 3) {
-                    player.sendMessage("§c사용법: /레이드박스 드랍템 <박스이름> <확률(0-100)>");
-                    return true;
-                }
-                try {
-                    int chance = Integer.parseInt(args[2]);
-                    this.raidManager.addHandItemToDrops(player, raidName, chance);
-                } catch (NumberFormatException e) {
-                    player.sendMessage("§c[System] 확률은 숫자로 입력해주세요.");
-                }
-            }
-            else if (action.equalsIgnoreCase("장비")) {
-                if (args.length < 3) {
-                    player.sendMessage("§c사용법: /레이드박스 장비 <박스이름> <부위>");
-                    player.sendMessage("§7(부위: weapon, helmet, chest, legs, boots)");
-                    return true;
-                }
-                String slot = args[2].toLowerCase();
-                this.raidManager.setHandItemToEquipment(player, raidName, slot);
-            }
-
-            return true;
-        }
-        if (label.equalsIgnoreCase("보온설정")) {
-            if (!player.isOp()) {
-                player.sendMessage("§c[System] 관리자만 사용할 수 있는 명령어입니다.");
-                return true;
-            }
-
-            if (args.length != 1) {
-                player.sendMessage("§c[System] 사용법: /보온설정 [수치]");
-                return true;
-            }
-
-            try {
-                int level = Integer.parseInt(args[0]);
-                setInsulationTag(player, level);
-            } catch (NumberFormatException e) {
-                player.sendMessage("§c[System] 숫자를 입력해주세요. (예: /보온설정 5)");
-            }
-            return true;
-        }
-        if (label.equalsIgnoreCase("방호설정")) {
-            if (!player.isOp()) {
-                player.sendMessage("§c[System] 관리자만 사용할 수 있는 명령어입니다.");
-                return true;
-            }
-            if (args.length != 1) {
-                player.sendMessage("§c[System] 사용법: /방호설정 [수치]");
-                return true;
-            }
-            try {
-                int level = Integer.parseInt(args[0]);
-                setRadiationTag(player, level);
-            } catch (NumberFormatException e) {
-                player.sendMessage("§c[System] 숫자를 입력해주세요.");
-            }
-            return true;
-        }
-
-        if (label.equalsIgnoreCase("스폰설정")) {
-            if (!player.isOp()) return true;
-
-            respawnManager.addLocation(player.getLocation());
-            player.sendMessage("§a[System] §f현재 위치를 랜덤 리스폰 지점으로 등록했습니다.");
-            return true;
-        }
-
-        // 1. 인자 1개 명령어 (멤버, 나가기, 수락)
-        if (args.length == 1) {
-            if (args[0].equalsIgnoreCase("멤버")) {
-                openGroupGUI(player);
-                return true;
-            }
-            if (args[0].equalsIgnoreCase("나가기")) {
-                if (groupManager.leaveGroup(player)) {
-                    player.sendMessage("§e[Group] 그룹에서 퇴장했습니다.");
-                }
-                return true;
-            }
-            if (args[0].equalsIgnoreCase("수락")) {
-                if (groupManager.acceptInvite(player)) {
-                    player.sendMessage("§a[Group] 초대를 수락하여 그룹에 가입되었습니다.");
-                } else {
-                    player.sendMessage("§c[Group] 받은 초대가 없거나 만료되었습니다.");
-                }
-                return true;
-            }
-        }
-        // 2. 도움말 출력 (인자가 부족할 때)
-        if (args.length < 2) {
-            String[] helpMessages = {
-                    "§6--- 그룹 시스템 도움말 ---",
-                    "§f/그룹 생성 [이름]: 새 그룹을 만듭니다.",
-                    "§f/그룹 초대 [닉네임]: 플레이어를 초대합니다.",
-                    "§f/그룹 수락: 받은 초대를 승인합니다.",
-                    "§f/그룹 나가기: 그룹에서 탈퇴합니다.",
-                    "§f/그룹 멤버: 그룹원 목록을 확인합니다.",
-                    "§c/그룹 삭제 [이름]: 그룹을 삭제합니다."
-            };
-            player.sendMessage(helpMessages);
-            return true;
-        }
-
-        // 3. 인자 2개 이상 명령어 처리
-        String action = args[0];
-        String param = args[1]; // 여기서 param으로 정의했습니다.
-
-        if (action.equalsIgnoreCase("생성")) {
-            if (groupManager.hasGroup(player)) {
-                player.sendMessage("§c이미 그룹에 속해 있습니다.");
-                return true;
-            }
-            groupManager.createGroup(param, player);
-            player.sendMessage("§a그룹 '" + param + "'을(를) 생성했습니다.");
-        }
-        else if (action.equalsIgnoreCase("초대")) {
-            String groupName = groupManager.getPlayerGroup(player);
-            if (groupName == null) {
-                player.sendMessage("§c소속된 그룹이 없습니다.");
-                return true;
-            }
-
-            if (!groupManager.isGroupOwner(groupName, player)) {
-                player.sendMessage("§c그룹장만 초대할 수 있습니다.");
-                return true;
-            }
-
-            Player target = Bukkit.getPlayer(param);
-            if (target == null || !target.isOnline()) {
-                player.sendMessage("§c대상을 찾을 수 없거나 오프라인입니다.");
-                return true;
-            }
-
-            groupManager.invitePlayer(target, groupName);
-            player.sendMessage("§e" + target.getName() + "님을 초대했습니다.");
-            target.sendMessage("§6[Group] " + player.getName() + "님이 '" + groupName + "' 그룹에 초대했습니다.");
-            target.sendMessage("§6[Group] §f/그룹 수락§e 명령어로 가입하세요.");
-        }
-        else if (action.equalsIgnoreCase("삭제")) {
-            // 수정됨: gName 대신 param을 사용해야 합니다.
-            if (player.isOp() || groupManager.isGroupOwner(param, player)) {
-                groupManager.deleteGroup(param);
-                player.sendMessage("§e[Group] 그룹 '" + param + "'이(가) 삭제되었습니다.");
-            } else {
-                player.sendMessage("§c[Group] 그룹 삭제 권한이 없습니다 (주인만 가능).");
-            }
-        }
-        return false;
-    }
     public void saveSpawnerConfig() {
         try {
             if (spawnerConfig != null && spawnerFile != null) {
@@ -905,7 +687,18 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
     public Block getMasterBlock(Block b) {
         if (b == null) return null;
         String typeName = b.getType().name().toUpperCase();
-
+        if (typeName.contains("_BED")) {
+            // BedManager에 있는 getBedBaseLocation 로직을 활용하거나 직접 구현
+            // 침대는 보통 하단(Foot) 블록을 마스터로 잡습니다.
+            if (b.getBlockData() instanceof org.bukkit.block.data.type.Bed) {
+                org.bukkit.block.data.type.Bed bedData = (org.bukkit.block.data.type.Bed) b.getBlockData();
+                if (bedData.getPart() == org.bukkit.block.data.type.Bed.Part.HEAD) {
+                    // 머리 부분을 클릭했다면 발치(Foot) 방향의 블록을 리턴
+                    return b.getRelative(bedData.getFacing().getOppositeFace());
+                }
+            }
+            return b; // 이미 발치라면 그대로 리턴
+        }
         if (typeName.contains("BIG_DOOR") || typeName.contains("DOOR_DUMMY")) {
             return findBigDoorMaster(b);
         }
@@ -1156,7 +949,9 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         String correctName;
         int correctMax;
 
-
+        if (b.getType().name().contains("_BED")) {
+            return;
+        }
         if (typeName.contains("ARMORED_DOOR")) {
             correctName = "합금 문";
             correctMax = 800; // 설정하고 싶은 체력
@@ -1255,6 +1050,9 @@ public final class main extends JavaPlugin implements Listener, CommandExecutor 
         int maxHp;
         String displayName;
 
+        if (b.getType().name().contains("_BED")) {
+            return;
+        }
         // 2. 조건문에 따라 값을 할당합니다.
         if (typeName.contains("ARMORED_DOOR")) {
             maxHp = 800;

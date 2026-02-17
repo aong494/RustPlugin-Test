@@ -71,12 +71,16 @@ public class PlankToIronManager implements Listener {
         }
         p.getInventory().setContents(contents);
     }
-    @EventHandler(priority = EventPriority.HIGHEST)
+    @EventHandler(priority = EventPriority.NORMAL)
     public void onBlockInteract(PlayerInteractEvent e) {
         if (e.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) return;
         Block b = e.getClickedBlock();
         if (b == null) return;
 
+        String typeName = b.getType().name();
+        if (typeName.contains("BED")) {
+            return;
+        }
         Player player = e.getPlayer();
         ItemStack mainHand = player.getInventory().getItemInMainHand();
         if (mainHand.getType() != Material.STICK) return;
@@ -105,7 +109,6 @@ public class PlankToIronManager implements Listener {
         }
 
         e.setCancelled(true);
-        String typeName = b.getType().name();
 
         // --- 3. 이름 및 체력 데이터 로드 ---
         String displayName = plugin.dataStorage.getConfig().getString(activePath + ".display_name");
@@ -150,8 +153,13 @@ public class PlankToIronManager implements Listener {
             settingKey = "stone-settings";
         }
         else {
-            if (displayName == null) displayName = "나무";
-            if (maxHp == -1) maxHp = WOOD_MAX_HP; // 50
+            // [수정] 무조건 "나무"라고 하지 말고, 정말 planks 데이터에 있을 때만 작동하게 합니다.
+            if (isPlank || isDoor) {
+                if (displayName == null) displayName = "나무";
+                if (maxHp == -1) maxHp = WOOD_MAX_HP;
+            } else {
+                return; // 데이터에 없는 블록(침대 등)이면 여기서 중단!
+            }
         }
 
         // --- 5. 상호작용 분기 처리 ---

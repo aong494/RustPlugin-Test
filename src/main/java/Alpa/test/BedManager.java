@@ -24,10 +24,15 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class BedManager implements Listener, CommandExecutor {
@@ -40,7 +45,37 @@ public class BedManager implements Listener, CommandExecutor {
 
     public BedManager(main plugin) {
         this.plugin = plugin;
-        startUpdateTask();
+    }
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!(sender instanceof Player player)) return true;
+
+        if (label.equalsIgnoreCase("bedrespawn")) {
+            if (args.length == 0) return true;
+
+            // 1. 랜덤 부활 클릭 시
+            if (args[0].equalsIgnoreCase("random")) {
+                // "random"이라는 고정 문자열을 메타데이터에 저장
+                player.setMetadata("selected_respawn_loc", new org.bukkit.metadata.FixedMetadataValue(plugin, "random"));
+                return true;
+            }
+
+            // 2. 침대 좌표 클릭 시
+            if (args.length < 3) return true;
+            try {
+                // 소수점을 버리고 정확한 블록 좌표(int)로 변환하여 오차 방지
+                int x = (int) Double.parseDouble(args[0]);
+                int y = (int) Double.parseDouble(args[1]);
+                int z = (int) Double.parseDouble(args[2]);
+                Location loc = new Location(player.getWorld(), x, y, z);
+
+                player.setMetadata("selected_respawn_loc", new org.bukkit.metadata.FixedMetadataValue(plugin, loc));
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return true;
+        }
+        return false;
     }
     public void sendBedLocationsToClient(Player player) {
         List<String> beds = plugin.getConfig().getStringList("player_beds." + player.getUniqueId());
@@ -55,7 +90,7 @@ public class BedManager implements Listener, CommandExecutor {
         sb.append("|active:").append(activeBed != null ? activeBed : "none");
 
         // "rust:bed_data" 채널로 데이터 전송 (메인 클래스에서 채널 등록 필요)
-        player.sendPluginMessage(plugin, "rust:bed_data", sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        player.sendPluginMessage(plugin, "examplemod:bed_data", sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
     private String getProgressBar(double current, double max) {
         int bars = 10;
@@ -69,7 +104,7 @@ public class BedManager implements Listener, CommandExecutor {
     }
 
     // --- 침대 머리/발치 좌표 통합 보조 메서드 ---
-    private Location getBedBaseLocation(Block block) {
+    public Location getBedBaseLocation(Block block) {
         if (block == null || !block.getType().name().contains("_BED")) return block != null ? block.getLocation() : null;
         org.bukkit.block.data.type.Bed bedData = (org.bukkit.block.data.type.Bed) block.getBlockData();
         if (bedData.getPart() == org.bukkit.block.data.type.Bed.Part.HEAD) {
@@ -78,65 +113,7 @@ public class BedManager implements Listener, CommandExecutor {
         return block.getLocation();
     }
 
-    @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player player)) return true;
-        openBedGUI(player);
-        return true;
-    }
 
-    private void startUpdateTask() {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    if (player.getOpenInventory().getTitle().equals("§0부활 지점 선택")) {
-                        updateBedItems(player, player.getOpenInventory().getTopInventory());
-                    }
-                }
-            }
-        }.runTaskTimer(plugin, 0L, 20L);
-    }
-
-    public void openBedGUI(Player p) {
-        Inventory gui = Bukkit.createInventory(null, 9, "§0부활 지점 선택");
-        updateBedItems(p, gui);
-        p.openInventory(gui);
-    }
-
-    private void updateBedItems(Player p, Inventory gui) {
-        List<String> beds = plugin.getConfig().getStringList("player_beds." + p.getUniqueId());
-        String activeBed = plugin.getConfig().getString("active_bed." + p.getUniqueId());
-        long now = System.currentTimeMillis();
-
-        for (int i = 0; i < 9; i++) {
-            if (i < beds.size()) {
-                String locStr = beds.get(i);
-                long lastUse = plugin.getConfig().getLong("bed_cooldown." + locStr.replace(",", "_"), 0);
-                long remain = (COOLDOWN_MS - (now - lastUse)) / 1000;
-
-                ItemStack item = new ItemStack(remain > 0 ? Material.WHITE_BED : Material.RED_BED);
-                ItemMeta meta = item.getItemMeta();
-                List<String> lore = new ArrayList<>();
-
-                if (remain > 0) {
-                    meta.setDisplayName("§7침대 #" + (i + 1) + " §c(" + remain + "초)");
-                    lore.add("§c재충전 중... 부활 불가");
-                } else {
-                    boolean isActive = locStr.equals(activeBed);
-                    meta.setDisplayName((isActive ? "§a§l● " : "§e") + "침대 #" + (i + 1));
-                    lore.add(isActive ? "§b▶ 현재 부활 지점" : "§f좌클릭: 부활 지점으로 설정");
-                }
-                lore.add("§8위치: " + locStr.replace(",", " / "));
-                lore.add("§4우클릭: 데이터 삭제 및 블록 제거");
-                meta.setLore(lore);
-                item.setItemMeta(meta);
-                gui.setItem(i, item);
-            } else {
-                gui.setItem(i, null);
-            }
-        }
-    }
 
     // --- 에러가 발생했던 인벤토리 클릭 로직 수정 ---
     @EventHandler
@@ -179,8 +156,9 @@ public class BedManager implements Listener, CommandExecutor {
 
             if (e.getClick() == ClickType.RIGHT) {
                 Location loc = stringToLocation(selectedLoc);
-                if (loc != null && loc.getBlock().getType().name().contains("_BED")) {
-                    loc.getBlock().setType(Material.AIR);
+                if (loc != null) {
+                    // 주변 1칸 내의 모든 침대 블록을 아이템 드랍 없이 제거
+                    removeConnectedBedBlocks(loc);
                     loc.getWorld().playSound(loc, org.bukkit.Sound.BLOCK_WOOD_BREAK, 1.0f, 0.8f);
                 }
                 beds.remove(slot);
@@ -189,19 +167,20 @@ public class BedManager implements Listener, CommandExecutor {
                     plugin.getConfig().set("active_bed." + p.getUniqueId(), null);
                 }
                 plugin.saveConfig();
+                syncAllBedsToClient(p);
                 p.sendMessage("§e[Bed] 침대 데이터와 블록을 제거했습니다.");
-                updateBedItems(p, e.getInventory());
             }
             else if (e.getClick() == ClickType.LEFT) {
                 plugin.getConfig().set("active_bed." + p.getUniqueId(), selectedLoc);
                 plugin.saveConfig();
+                syncAllBedsToClient(p);
                 p.sendMessage("§a[Bed] 부활 지점 설정 완료.");
                 p.closeInventory();
             }
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onBedInteract(PlayerInteractEvent e) {
         if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         if (e.getHand() == org.bukkit.inventory.EquipmentSlot.OFF_HAND) return;
@@ -222,7 +201,7 @@ public class BedManager implements Listener, CommandExecutor {
         if (p.getInventory().getItemInMainHand().getType() == Material.STICK) {
             if (p.isSneaking()) {
                 if (isOwner) {
-                    baseLoc.getBlock().setType(Material.AIR);
+                    removeConnectedBedBlocks(baseLoc);
                     removeBedData(locStr);
                     p.sendMessage("§a[Bed] 막대기로 자신의 침대를 철거했습니다.");
                     p.playSound(baseLoc, org.bukkit.Sound.BLOCK_WOOD_BREAK, 1.0f, 1.0f);
@@ -288,6 +267,7 @@ public class BedManager implements Listener, CommandExecutor {
 
         plugin.saveConfig();
         bedHealthMap.put(locStr, MAX_BED_HEALTH);
+        syncAllBedsToClient(p);
     }
 
     @EventHandler
@@ -318,7 +298,30 @@ public class BedManager implements Listener, CommandExecutor {
                     TextComponent.fromLegacyText("§c[Bed] 침대가 파괴되었습니다!"));
         }
     }
+    // 특정 위치의 침대와 연결된 2개의 블록만 정확히 제거하는 메서드
+    private void removeConnectedBedBlocks(Location startLoc) {
+        Block block = startLoc.getBlock();
+        if (!block.getType().name().contains("_BED")) return;
 
+        // 현재 블록의 데이터 확인 (머리인지 발치인지)
+        org.bukkit.block.data.type.Bed bedData = (org.bukkit.block.data.type.Bed) block.getBlockData();
+        Block otherPart;
+
+        // 반대쪽 파트 위치 계산
+        if (bedData.getPart() == org.bukkit.block.data.type.Bed.Part.FOOT) {
+            otherPart = block.getRelative(bedData.getFacing());
+        } else {
+            otherPart = block.getRelative(bedData.getFacing().getOppositeFace());
+        }
+
+        // 1. 현재 클릭한 블록 제거
+        block.setType(Material.AIR, false);
+
+        // 2. 연결된 반대쪽 블록이 침대라면 제거
+        if (otherPart.getType().name().contains("_BED")) {
+            otherPart.setType(Material.AIR, false);
+        }
+    }
     public void applyBedExplodeDamage(Block b, double damage) {
         // 1. 통합 좌표(발치) 가져오기
         Location baseLoc = getBedBaseLocation(b);
@@ -331,9 +334,13 @@ public class BedManager implements Listener, CommandExecutor {
         if (currentHealth > 0) {
             bedHealthMap.put(locStr, currentHealth);
         } else {
-            // 체력 소진 시 파괴
-            b.setType(Material.AIR);
+            // --- [핵심 수정: 아이템 드랍 방지 파괴 로직] ---
+
+            // 주변 1칸 내의 모든 침대 블록(머리, 발치)을 아이템 드랍 없이 제거
+            removeConnectedBedBlocks(baseLoc);
+            // 데이터베이스에서 침대 정보 삭제
             removeBedData(locStr);
+            // 파괴 시 소리 효과
             baseLoc.getWorld().playSound(baseLoc, org.bukkit.Sound.ENTITY_GENERIC_EXPLODE, 0.8f, 0.8f);
         }
     }
@@ -350,6 +357,9 @@ public class BedManager implements Listener, CommandExecutor {
                     plugin.getConfig().set("active_bed." + uuid, null);
                 }
                 plugin.saveConfig();
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    syncAllBedsToClient(p);
+                }
                 break;
             }
         }
@@ -361,20 +371,34 @@ public class BedManager implements Listener, CommandExecutor {
             p.sendMessage("§c[Bed] 소속된 그룹이 없어 양도를 진행할 수 없습니다.");
             return;
         }
+
         List<String> memberUUIDs = plugin.groupManager.getGroupMembers(groupName);
-        Inventory gui = Bukkit.createInventory(null, 27, "§0양도 대상 선택");
+
+        // --- [수정 핵심: 인벤토리 생성/오픈 코드 삭제] ---
+        // Inventory gui = Bukkit.createInventory(null, 27, "§0양도 대상 선택"); <- 삭제
+
+        // 대신 클라이언트가 알아들을 수 있는 문자열 패킷 생성
+        StringBuilder sb = new StringBuilder("OPEN_TRANSFER_GUI|");
+        sb.append(bedLoc).append("|");
+
+        boolean hasMembers = false;
         for (String uuidStr : memberUUIDs) {
             if (uuidStr.equals(p.getUniqueId().toString())) continue;
+
             OfflinePlayer op = Bukkit.getOfflinePlayer(UUID.fromString(uuidStr));
-            ItemStack head = new ItemStack(Material.PLAYER_HEAD);
-            SkullMeta meta = (SkullMeta) head.getItemMeta();
-            meta.setOwningPlayer(op);
-            meta.setDisplayName("§e" + (op.getName() != null ? op.getName() : "알 수 없음"));
-            meta.setLore(Arrays.asList("§7클릭하여 양도", "§hidden:" + bedLoc));
-            head.setItemMeta(meta);
-            gui.addItem(head);
+            String name = (op.getName() != null) ? op.getName() : "알 수 없음";
+
+            sb.append(uuidStr).append(":").append(name).append(",");
+            hasMembers = true;
         }
-        p.openInventory(gui);
+
+        if (!hasMembers) {
+            p.sendMessage("§c[Bed] 양도할 수 있는 그룹 멤버가 없습니다.");
+            return;
+        }
+
+        // 클라이언트로 패킷 전송 (채널명이 일치하는지 확인하세요)
+        p.sendPluginMessage(plugin, "examplemod:bed_data", sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private void transferBed(Player giver, OfflinePlayer receiver, String bedLoc) {
@@ -393,36 +417,96 @@ public class BedManager implements Listener, CommandExecutor {
         }
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST) // 우선순위를 최상으로 올림
-    public void onRespawn(PlayerRespawnEvent e) {
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onPlayerRespawn(PlayerRespawnEvent e) {
         Player p = e.getPlayer();
-        String activeBedLoc = plugin.getConfig().getString("active_bed." + p.getUniqueId());
+        Location targetLoc = null;
+        boolean forceRandom = false;
 
-        if (activeBedLoc != null) {
-            long lastUse = plugin.getConfig().getLong("bed_cooldown." + activeBedLoc.replace(",", "_"), 0);
-            long now = System.currentTimeMillis();
+        // 1. 유저의 메타데이터 확인 (클릭했는지, 랜덤 눌렀는지)
+        if (p.hasMetadata("selected_respawn_loc")) {
+            Object metaValue = p.getMetadata("selected_respawn_loc").get(0).value();
+            p.removeMetadata("selected_respawn_loc", plugin);
 
-            if (now - lastUse < COOLDOWN_MS) {
-                p.sendMessage("§c[Bed] 침대가 재충전 중입니다. (" + ((COOLDOWN_MS - (now - lastUse)) / 1000) + "초 남음)");
-            } else {
-                Location loc = stringToLocation(activeBedLoc);
-                if (loc != null && loc.getBlock().getType().name().contains("_BED")) {
-                    // 블록 정중앙 위쪽(y+1.2)으로 설정하여 끼임 방지
-                    Location respawnLoc = loc.clone().add(0.5, 1.2, 0.5);
-                    e.setRespawnLocation(respawnLoc);
-
-                    // 쿨타임 및 메시지
-                    plugin.getConfig().set("bed_cooldown." + activeBedLoc.replace(",", "_"), System.currentTimeMillis());
-                    plugin.saveConfig();
-                    p.sendMessage("§a[Bed] 침대에서 부활했습니다.");
+            if (metaValue instanceof String && metaValue.equals("random")) {
+                forceRandom = true; // 랜덤 버튼 확정
+            } else if (metaValue instanceof Location) {
+                // 클릭한 좌표를 즉시 침대 발치(Base) 좌표로 보정
+                Block b = findBedBlockNearby((Location) metaValue);
+                if (b != null) {
+                    targetLoc = getBedBaseLocation(b);
                 }
             }
         }
-    }
-    private String locationToString(Location loc) {
-        return loc.getWorld().getName() + "," + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ();
+
+        // 2. [중요] 유저가 랜덤을 선택했다면 무조건 랜덤 로직으로 점프
+        if (forceRandom) {
+            processRandomRespawn(e, p);
+            return;
+        }
+
+        // 3. 아무것도 안 눌렀을 때만 활성 침대(Active Bed)를 가져옴
+        if (targetLoc == null) {
+            String activeBedStr = plugin.getConfig().getString("active_bed." + p.getUniqueId());
+            if (activeBedStr != null) {
+                targetLoc = stringToLocation(activeBedStr);
+            }
+        }
+
+        // 4. 침대 부활 처리
+        if (targetLoc != null) {
+            Block bedBlock = findBedBlockNearby(targetLoc);
+            if (bedBlock != null) {
+                Location baseLoc = getBedBaseLocation(bedBlock);
+                String cooldownKey = locationToString(baseLoc).replace(",", "_");
+
+                long lastUse = plugin.getConfig().getLong("bed_cooldown." + cooldownKey, 0);
+                long now = System.currentTimeMillis();
+
+                if (now - lastUse >= COOLDOWN_MS) {
+                    e.setRespawnLocation(baseLoc.clone().add(0.5, 1.2, 0.5));
+                    plugin.getConfig().set("bed_cooldown." + cooldownKey, now);
+                    plugin.saveConfig();
+                    p.sendMessage("§a[Bed] 침대에서 부활했습니다.");
+                    return; // 침대 부활 성공 시 종료
+                } else {
+                    long remain = (COOLDOWN_MS - (now - lastUse)) / 1000;
+                    p.sendMessage("§c[Bed] 이 침대는 아직 충전 중입니다 (" + remain + "초 남음)");
+                }
+            }
+        }
+
+        // 5. 위 로직에서 return되지 못했다면(침대 없음/쿨타임/랜덤선택) 최종 랜덤 부활
+        processRandomRespawn(e, p);
     }
 
+    // 중복 코드를 줄이기 위한 헬퍼 메서드
+    private void processRandomRespawn(PlayerRespawnEvent e, Player p) {
+        Location randomLoc = plugin.respawnManager.getSafeRandomLocation();
+        if (randomLoc != null) {
+            e.setRespawnLocation(randomLoc);
+            p.sendMessage("§e[System] 무작위 지점에서 부활했습니다.");
+        }
+    }
+
+    // --- 주변에 침대 블록이 있는지 찾는 보조 메서드 ---
+    private Block findBedBlockNearby(Location loc) {
+        // 해당 좌표 및 상하좌우 1칸 검사
+        for (int x = -1; x <= 1; x++) {
+            for (int y = -1; y <= 1; y++) {
+                for (int z = -1; z <= 1; z++) {
+                    Block b = loc.clone().add(x, y, z).getBlock();
+                    if (b.getType().name().contains("_BED")) {
+                        return b;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+    public String locationToString(Location loc) {
+        return loc.getWorld().getName() + "," + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ();
+    }
     private Location stringToLocation(String s) {
         try {
             String[] p = s.split(",");
@@ -430,5 +514,45 @@ public class BedManager implements Listener, CommandExecutor {
         } catch (Exception e) {
             return null;
         }
+    }
+    public void syncAllBedsToClient(Player player) {
+        if (player == null || !player.isOnline()) return;
+        List<String> beds = plugin.getConfig().getStringList("player_beds." + player.getUniqueId());
+
+        StringBuilder sb = new StringBuilder();
+        long now = System.currentTimeMillis();
+
+        for (String loc : beds) {
+            if (sb.length() > 0) sb.append("|");
+            sb.append(loc);
+            String cooldownKey = loc.replace(",", "_");
+            long lastUse = plugin.getConfig().getLong("bed_cooldown." + cooldownKey, 0);
+            if (now - lastUse >= COOLDOWN_MS) {
+                sb.append(",READY");
+            } else {
+                sb.append(",WAIT");
+            }
+        }
+        if (sb.length() == 0) sb.append("none");
+        player.sendPluginMessage(plugin, "examplemod:bed_data", sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+    @EventHandler
+    public void onPlayerJoin(org.bukkit.event.player.PlayerJoinEvent e) {
+        // 접속 시 침대 위치 동기화
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                syncAllBedsToClient(e.getPlayer());
+            }
+        }.runTaskLater(plugin, 20L); // 1초 뒤 안정적으로 전송
+    }
+
+    @EventHandler
+    public void onPlayerDeath(org.bukkit.event.entity.PlayerDeathEvent e) {
+        // 사망 시 침대 위치 최신화하여 전송 (지도 표시용)
+        syncAllBedsToClient(e.getEntity());
+    }
+    public Map<String, Double> getBedHealthMap() {
+        return this.bedHealthMap;
     }
 }

@@ -30,7 +30,6 @@ public class PlankHealthManager implements Listener {
         return loc.getWorld().getName() + "," + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ();
     }
 
-    // 매개변수를 (Block, String)으로 변경합니다.
     public static void applyBulletDamage(Block block, String gunId) {
         main plugin = (main) Bukkit.getPluginManager().getPlugin("Rust");
         if (plugin == null) return;
@@ -43,23 +42,22 @@ public class PlankHealthManager implements Listener {
         Material type = block.getType();
         String typeName = type.name().toUpperCase();
 
-        // 문 계열(합금문, 차고문, 일반문, 더미 포함)인지 확인
-        boolean isDoor = typeName.contains("_DOOR") || typeName.contains("BIG_DOOR") || typeName.contains("DUMMY");
-
-        if (isDoor) {
-            // [수정] 문일 경우 applyDmg 호출 (마스터 블록은 applyDmg 내부에서 찾으므로 block 그대로 전달)
+        if (typeName.contains("_BED")) {
+            plugin.bedManager.applyBedExplodeDamage(block, (double) finalDamage);
+        } else if (typeName.contains("_DOOR") || typeName.contains("BIG_DOOR") || typeName.contains("DUMMY")) {
+            // 문 계열
             plugin.applyDmg(block, finalDamage, null);
         } else {
-            // 일반 블록(판자, 터렛 등)일 경우 기존 로직 유지
+            // 일반 구조물 (판자 등)
             plugin.applyPlankDmg(block, finalDamage, null);
         }
     }
     private boolean isTargetBlock(Material material) {
         if (material == null) return false;
+        String name = material.name().toUpperCase();
         // 1. 터렛 (골드 블록)
         if (material == Material.TINTED_GLASS) return true;
-
-        String name = material.name().toUpperCase();
+        if (name.contains("_BED")) return true;
 
         // "TRAPDOOR"(다락문)는 제외하고 모든 "DOOR"가 포함된 블록을 잡습니다.
         if (name.contains("DOOR") && !name.contains("TRAPDOOR")) return true;
@@ -97,7 +95,9 @@ public class PlankHealthManager implements Listener {
         int initialHp;
         String displayName;
         // --- [이름 및 체력 판별 로직 수정] ---
-
+        if (b.getType().name().contains("_BED")) {
+            return;
+        }
         if (typeName.contains("ARMORED_DOOR")) {
             initialHp = 800; // 무장 문 체력 설정
             displayName = "합금 문";
@@ -133,7 +133,7 @@ public class PlankHealthManager implements Listener {
         plugin.dataStorage.saveConfig();
     }
     // 상호작용 로직
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlankInteract(PlayerInteractEvent e) {
         if (e.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) return;
         if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
@@ -143,11 +143,26 @@ public class PlankHealthManager implements Listener {
 
         Player p = e.getPlayer();
         ItemStack item = p.getInventory().getItemInMainHand();
+
+        String typeName = b.getType().name().toUpperCase();
+        if (typeName.contains("BED")) {
+            // 막대기를 들고 있을 때만 침대 체력 표시
+            if (item.getType() == Material.STICK) {
+                e.setCancelled(true);
+
+                Location baseLoc = plugin.bedManager.getBedBaseLocation(b);
+                String locStr = plugin.bedManager.locationToString(baseLoc);
+                double currentHealth = plugin.bedManager.getBedHealthMap().getOrDefault(locStr, 10.0);
+
+                String progressBar = getProgressBar((int)currentHealth, 10);
+                p.spigot().sendMessage(ChatMessageType.ACTION_BAR,
+                        TextComponent.fromLegacyText("§e[Bed] 침대 체력: " + progressBar + " §f" + String.format("%.1f", currentHealth) + " / 10.0"));
+            }
+            // 침대라면 여기서 무조건 return하여 아래 '나무 구조물' 로직이 실행 안 되게 막음
+            return;
+        }
         // 막대기를 들고 있을 때만 정보 표시
         if (item.getType() == Material.STICK) {
-            Material type = b.getType();
-            String typeName = type.name().toUpperCase();
-
             // 1. [추가] 문 여부 확인 및 경로 결정
             // 문(모드 문 포함)은 "doors." 경로를, 일반 구조물은 "planks." 경로를 사용합니다.
             boolean isBigDoor = typeName.contains("BIG_DOOR") || typeName.contains("DOOR_DUMMY");
@@ -230,6 +245,12 @@ public class PlankHealthManager implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlankBreak(BlockBreakEvent e) {
         Block b = e.getBlock();
+        Material type = b.getType();
+        String typeName = type.name().toUpperCase();
+
+        if (typeName.contains("_BED")) {
+            return;
+        }
         if (!isTargetBlock(b.getType())) return;
 
         // dataStorage에서 키 확인
